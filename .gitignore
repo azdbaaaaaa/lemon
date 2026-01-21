@@ -1,0 +1,85 @@
+# Binaries
+bin/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of go coverage
+*.out
+coverage.html
+coverage.txt
+
+# Go workspace
+go.work
+go.work.sum
+
+# Dependency directories
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+
+# Config with secrets (keep examples)
+configs/config.local.yaml
+configs/config.prod.yaml
+configs/config.*.local.yaml
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+
+# Debug
+debug
+__debug_bin
+*.prof
+
+# Air live reload
+.air.toml.tmp
+
+# Build artifacts
+*.pid
+
+# Test cache
+.testcache/
+
+# Wire generated
+wire_gen.go
+
+# Database
+*.db
+*.sqlite
+*.sqlite3

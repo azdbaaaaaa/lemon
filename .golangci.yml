@@ -1,0 +1,203 @@
+# golangci-lint 配置
+# 文档: https://golangci-lint.run/usage/configuration/
+
+run:
+  timeout: 5m
+  issues-exit-code: 1
+  tests: true
+  modules-download-mode: readonly
+
+output:
+  formats:
+    - format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+  sort-results: true
+
+linters:
+  enable:
+    # 默认启用
+    - errcheck       # 检查未处理的错误
+    - gosimple       # 简化代码建议
+    - govet          # 报告可疑的构造
+    - ineffassign    # 检测无效赋值
+    - staticcheck    # 静态分析
+    - unused         # 检查未使用的代码
+
+    # 额外启用
+    - bodyclose      # 检查 HTTP response body 是否关闭
+    - contextcheck   # 检查函数是否使用非继承的 context
+    - durationcheck  # 检查 time.Duration 乘法
+    - errname        # 检查错误变量命名
+    - errorlint      # 检查错误处理
+    - exhaustive     # 检查 switch 完整性
+    - gocognit       # 认知复杂度检查
+    - goconst        # 检查可以定义为常量的字符串
+    - gocritic       # 代码风格检查
+    - gofmt          # 格式化检查
+    - goimports      # import 排序检查
+    - gosec          # 安全检查
+    - misspell       # 拼写检查
+    - nakedret       # 裸返回检查
+    - nilerr         # nil error 检查
+    - noctx          # 检查 HTTP 请求是否带 context
+    - prealloc       # slice 预分配建议
+    - predeclared    # 检查预声明标识符覆盖
+    - revive         # 代码风格检查 (golint 替代)
+    - unconvert      # 检查不必要的类型转换
+    - unparam        # 检查未使用的参数
+    - whitespace     # 检查不必要的空白
+
+  disable:
+    - funlen         # 函数长度 (太严格)
+    - gochecknoglobals  # 全局变量检查 (有时需要)
+    - gochecknoinits    # init 函数检查 (有时需要)
+    - godot          # 注释句号检查 (太严格)
+    - lll            # 行长度检查 (太严格)
+    - wsl            # 空白行检查 (太严格)
+    - wrapcheck      # 错误包装检查 (太严格)
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: false  # 不检查 _ = xxx 形式
+    exclude-functions:
+      - io.Copy
+      - io.WriteTo
+      - (io.Closer).Close
+      - (*os.File).Close
+      - (*github.com/spf13/viper.Viper).BindPFlag
+
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment  # 结构体字段对齐 (影响可读性)
+      - shadow          # 变量遮蔽 (有时需要)
+
+  gocognit:
+    min-complexity: 30  # 认知复杂度阈值
+
+  goconst:
+    min-len: 3          # 最小字符串长度
+    min-occurrences: 3  # 最小出现次数
+
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
+      - performance
+    disabled-checks:
+      - hugeParam       # 大参数检查 (有时需要)
+      - rangeValCopy    # range 值复制 (性能影响小)
+
+  gofmt:
+    simplify: true
+
+  goimports:
+    local-prefixes: lemon
+
+  gosec:
+    excludes:
+      - G104  # 未检查错误 (errcheck 已处理)
+      - G304  # 文件路径注入 (有时是预期行为)
+
+  misspell:
+    locale: US
+
+  nakedret:
+    max-func-lines: 30
+
+  prealloc:
+    simple: true
+    range-loops: true
+    for-loops: false
+
+  revive:
+    severity: warning
+    rules:
+      - name: blank-imports
+      - name: context-as-argument
+      - name: context-keys-type
+      - name: dot-imports
+      - name: error-return
+      - name: error-strings
+      - name: error-naming
+      - name: exported
+      - name: if-return
+      - name: increment-decrement
+      - name: var-naming
+      - name: var-declaration
+      - name: package-comments
+      - name: range
+      - name: receiver-naming
+      - name: time-naming
+      - name: unexported-return
+      - name: indent-error-flow
+      - name: errorf
+      - name: empty-block
+      - name: superfluous-else
+      - name: unused-parameter
+      - name: unreachable-code
+      - name: redefines-builtin-id
+
+  unparam:
+    check-exported: false
+
+issues:
+  exclude-rules:
+    # 测试文件放宽规则
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gosec
+        - goconst
+        - gocognit
+        - unparam
+
+    # main 文件放宽规则
+    - path: main\.go
+      linters:
+        - gochecknoglobals
+
+    # cmd 目录放宽规则 (cobra 需要全局变量和特定函数签名)
+    - path: cmd/
+      linters:
+        - gochecknoglobals
+        - gochecknoinits
+        - revive  # cobra 回调函数签名固定
+
+    # handler 目录放宽 revive (gin 回调签名固定)
+    - path: internal/handler/
+      linters:
+        - revive
+
+    # server 目录放宽 contextcheck (shutdown 需要新 context)
+    - path: internal/server/
+      linters:
+        - contextcheck
+
+    # 忽略特定错误
+    - linters:
+        - gocritic
+      text: "unnecessaryDefer"
+
+    # 忽略 viper.BindPFlag 错误检查
+    - linters:
+        - errcheck
+      text: "viper.BindPFlag"
+
+  exclude-dirs:
+    - vendor
+    - third_party
+    - testdata
+
+  max-issues-per-linter: 50
+  max-same-issues: 10
+  new: false
+
+severity:
+  default-severity: warning
+  rules:
+    - linters:
+        - gosec
+      severity: error
