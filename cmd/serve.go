@@ -28,7 +28,7 @@ func init() {
 
 	// Server flags
 	flags.StringP("host", "H", "0.0.0.0", "server host")
-	flags.IntP("port", "p", 8080, "server port")
+	flags.IntP("port", "p", 7080, "server port")
 	flags.String("mode", "release", "server mode (debug/release/test)")
 
 	// AI flags

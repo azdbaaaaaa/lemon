@@ -1,0 +1,729 @@
+# 分层架构检查规则
+
+## 规则说明
+
+在完成任何后端代码实现后，**必须**检查代码是否满足Clean Architecture分层要求。
+
+## 分层架构要求
+
+### 1. 目录结构
+
+```
+internal/
+├── handler/          # Handler层（接口适配层）
+│   ├── auth.go
+│   ├── user.go
+│   └── ...
+├── service/          # Service层（业务逻辑层）
+│   ├── auth_service.go
+│   └── ...
+├── repository/       # Repository层（数据访问层，按模块组织）
+│   ├── auth/
+│   │   ├── user_repo.go
+│   │   └── refresh_token_repo.go
+│   ├── resource/
+│   │   └── resource_repo.go
+│   └── ...
+├── model/            # Model层（数据模型层，按模块组织）
+│   └── auth/
+│       ├── user.go
+│       └── refresh_token.go
+└── pkg/              # Infrastructure层（基础设施层）
+    ├── mongodb/
+    ├── cache/
+    └── ...
+```
+
+### 2. 各层职责
+
+#### Handler层 (`internal/handler/`)
+**职责**:
+- HTTP请求解析和参数校验
+- 响应封装和错误处理
+- 请求路由
+- Swagger注释
+
+**禁止**:
+- ❌ 直接调用Repository层
+- ❌ 直接操作数据库
+- ❌ 包含业务逻辑
+- ❌ 直接使用Model层（应通过Service层）
+
+**允许**:
+- ✅ 调用Service层
+- ✅ 使用DTO（Request/Response结构体）
+- ✅ 参数验证和错误处理
+
+**重要规范 - Request/Response位置**:
+- ✅ **Request/Response DTO必须定义在Handler层**，不能放在Model层
+- ✅ **每个API一个文件**，文件命名：`{module}/{api_name}.go`
+- ✅ 每个API文件包含：
+  - 该API的Request结构体定义
+  - 该API的Response结构体定义
+  - 该API的Handler方法
+- ✅ 共用的类型（如ErrorResponse、UserInfo）放在`{module}/common.go`中
+- ✅ Service层使用基本类型参数，不依赖Handler层的Request/Response类型
+
+**文件组织示例**:
+```
+internal/handler/auth/
+├── handler.go          # Handler结构体定义
+├── common.go           # 共用的ErrorResponse、UserInfo等
+├── register.go         # 注册API（RegisterRequest + RegisterResponse + Register方法）
+├── login.go            # 登录API（LoginRequest + LoginResponse + Login方法）
+├── refresh.go          # 刷新Token API（RefreshTokenRequest + RefreshTokenResponse + Refresh方法）
+├── logout.go           # 退出登录API（Logout方法）
+└── me.go               # 获取当前用户信息API（GetMe方法）
+```
+
+#### Service层 (`internal/service/`)
+**职责**:
+- 业务流程编排
+- 业务规则校验
+- 事务管理
+- 调用Repository和AI服务
+
+**禁止**:
+- ❌ 直接操作HTTP请求/响应
+- ❌ 直接操作数据库（通过Repository）
+- ❌ 包含HTTP相关代码
+
+**允许**:
+- ✅ 调用Repository层
+- ✅ 调用AI客户端
+- ✅ 调用存储服务
+- ✅ 调用队列服务
+- ✅ 使用Model层
+
+#### Repository层 (`internal/repository/`)
+**职责**:
+- 数据库操作封装
+- CRUD操作
+- 查询优化
+
+**禁止**:
+- ❌ 包含业务逻辑
+- ❌ 直接操作HTTP
+- ❌ 调用Service层（循环依赖）
+
+**允许**:
+- ✅ 使用Model层
+- ✅ 使用MongoDB客户端
+- ✅ 定义查询方法
+
+#### Model层 (`internal/model/`)
+**职责**:
+- 数据模型定义
+- 实体结构体
+- 枚举类型
+
+**禁止**:
+- ❌ 包含业务逻辑
+- ❌ 包含HTTP相关代码
+- ❌ 包含数据库操作代码
+
+**允许**:
+- ✅ 定义数据结构和枚举
+- ✅ 定义验证方法（如IsValid）
+
+### 3. 依赖方向检查
+
+**正确的依赖方向**:
+```
+Handler → Service → Repository → Model
+         ↓
+      AI Client / Storage / Queue
+```
+
+**禁止的依赖**:
+- ❌ Handler → Repository（应通过Service）
+- ❌ Handler → Model（应通过Service）
+- ❌ Service → Handler（循环依赖）
+- ❌ Repository → Service（循环依赖）
+- ❌ Model → 任何其他层（Model是最底层）
+
+### 4. 文件命名规范
+
+#### 4.1 Handler层文件命名
+- **格式**: `{module}/{api_name}.go` (按模块组织，每个API一个文件)
+- **示例**: 
+  - `auth/register.go` - 注册API
+  - `auth/login.go` - 登录API
+  - `auth/refresh.go` - 刷新Token API
+  - `auth/handler.go` - Handler结构体定义
+  - `auth/common.go` - 共用的ErrorResponse、UserInfo等
+- **禁止**: 
+  - ❌ `auth.go` (所有API放在一个文件)
+  - ❌ `auth_handler.go` (不应该有_handler后缀)
+  - ❌ `userHandler.go` (不应该有大写开头)
+  - ❌ `Auth.go` (不应该有大写开头)
+
+#### 4.2 Service层文件命名
+- **格式**: `{module}_service.go` (小写，下划线分隔)
+- **示例**: `auth_service.go`, `user_service.go`, `chat_service.go`
+- **禁止**: `authService.go`, `AuthService.go`, `auth.go`
+
+#### 4.3 Repository层文件命名
+- **格式**: `{module}/{entity}_repo.go` (按模块组织，小写，下划线分隔)
+- **示例**: 
+  - `auth/user_repo.go` - 用户仓库
+  - `auth/refresh_token_repo.go` - RefreshToken仓库
+  - `resource/resource_repo.go` - 资源仓库
+- **禁止**: 
+  - ❌ 平铺在`repository/`目录下，如`user_repo.go`, `refresh_token_repo.go`
+  - ❌ `userRepository.go`, `UserRepo.go`, `user.go`
+
+#### 4.4 Model层文件命名
+- **格式**: `{module}/{entity}.go` (按模块组织，小写)
+- **示例**: `auth/user.go`, `auth/refresh_token.go`, `workflow/workflow.go`
+- **禁止**: 平铺在`model/`目录下，如`user.go`, `refresh_token.go`
+
+### 5. 结构体和函数命名规范
+
+#### 5.1 Handler层命名
+- **结构体**: `Handler` (放在`{module}/handler.go`中，不包含模块名)
+  - 示例: `auth/handler.go` 中的 `Handler` 结构体
+- **构造函数**: `NewHandler()` (大驼峰，接受Service依赖注入)
+  - 示例: `NewHandler(authService *service.AuthService)`
+- **方法**: 动词开头，大驼峰，每个API一个方法
+  - 示例: `Register()`, `Login()`, `Refresh()`, `Logout()`, `GetMe()`
+- **Request/Response**: 定义在每个API文件中
+  - 示例: `RegisterRequest`, `RegisterResponseData` (在`register.go`中)
+
+#### 5.2 Service层命名
+- **结构体**: `{Module}Service` (大驼峰)
+  - 示例: `AuthService`, `UserService`, `ChatService`
+- **构造函数**: `New{Module}Service()` (大驼峰，接受依赖注入)
+  - 示例: `NewAuthService(userRepo, tokenRepo)`, `NewChatService(aiClient, convRepo)`
+- **方法**: 动词开头，大驼峰，接受`context.Context`
+  - 示例: `Register(ctx, req)`, `GetUserByID(ctx, id)`, `Chat(ctx, req)`
+
+#### 5.3 Repository层命名
+- **结构体**: `{Module}Repo` (大驼峰)
+  - 示例: `UserRepo`, `RefreshTokenRepo`, `ResourceRepo`
+- **构造函数**: `New{Module}Repo()` (大驼峰，接受数据库连接)
+  - 示例: `NewUserRepo(db)`, `NewRefreshTokenRepo(db)`, `NewResourceRepo(db)`
+- **包名**: 使用模块名作为包名
+  - 示例: `package auth` (在`repository/auth/`目录下), `package resource` (在`repository/resource/`目录下)
+- **方法**: CRUD操作，大驼峰，接受`context.Context`
+  - 示例: `Create(ctx, entity)`, `FindByID(ctx, id)`, `ListByUserID(ctx, userID, limit, offset)`, `Update(ctx, id, update)`, `Delete(ctx, id)`
+
+#### 5.4 Model层命名
+- **结构体**: 大驼峰，单数形式
+  - 示例: `User`, `RefreshToken`, `Workflow`
+- **枚举**: 大驼峰，常量使用前缀
+  - 示例: `UserRole`, `UserStatus`, `RoleAdmin`, `UserStatusActive`
+- **方法**: 验证方法，大驼峰
+  - 示例: `IsValid()`, `String()`, `IsExpired()`
+
+### 6. 优雅实现规范
+
+#### 6.1 Handler层优雅实现
+
+**必须遵循**:
+- ✅ 使用依赖注入，通过构造函数注入Service
+- ✅ 统一的错误处理和响应格式
+- ✅ 参数验证（使用`ShouldBindJSON`或`ShouldBindQuery`）
+- ✅ Swagger注释完整
+- ✅ 使用Context传递（从`gin.Context`获取`context.Context`）
+
+**示例**:
+```go
+// ✅ 正确示例
+type AuthHandler struct {
+    authService *service.AuthService
+}
+
+func NewAuthHandler(authService *service.AuthService) *AuthHandler {
+    return &AuthHandler{authService: authService}
+}
+
+func (h *AuthHandler) Register(c *gin.Context) {
+    var req RegisterRequest
+    if err := c.ShouldBindJSON(&req); err != nil {
+        c.JSON(http.StatusBadRequest, ErrorResponse{
+            Code:    40001,
+            Message: "Invalid request body",
+            Detail:  err.Error(),
+        })
+        return
+    }
+
+    ctx := c.Request.Context()
+    resp, err := h.authService.Register(ctx, &req)
+    if err != nil {
+        // 统一错误处理
+        c.JSON(http.StatusInternalServerError, ErrorResponse{
+            Code:    50001,
+            Message: err.Error(),
+        })
+        return
+    }
+
+    c.JSON(http.StatusCreated, resp)
+}
+```
+
+**禁止**:
+- ❌ 在Handler中直接创建Service或Repository实例
+- ❌ 在Handler中包含业务逻辑
+- ❌ 忽略错误处理
+- ❌ 缺少参数验证
+
+#### 6.2 Service层优雅实现
+
+**必须遵循**:
+- ✅ 使用依赖注入，通过构造函数注入Repository和外部服务
+- ✅ 所有方法接受`context.Context`作为第一个参数
+- ✅ 统一的错误处理和日志记录
+- ✅ 业务规则校验
+- ✅ 事务管理（如需要）
+
+**示例**:
+```go
+// ✅ 正确示例
+type AuthService struct {
+    userRepo  *repository.UserRepo
+    tokenRepo *repository.RefreshTokenRepo
+    jwtSecret string
+}
+
+func NewAuthService(userRepo *repository.UserRepo, tokenRepo *repository.RefreshTokenRepo, jwtSecret string) *AuthService {
+    return &AuthService{
+        userRepo:  userRepo,
+        tokenRepo: tokenRepo,
+        jwtSecret: jwtSecret,
+    }
+}
+
+func (s *AuthService) Register(ctx context.Context, req *RegisterRequest) (*RegisterResponse, error) {
+    // 业务规则校验
+    if req.Username == "" {
+        return nil, errors.New("username is required")
+    }
+    
+    // 检查用户名是否已存在
+    existing, _ := s.userRepo.FindByUsername(ctx, req.Username)
+    if existing != nil {
+        return nil, errors.New("username already exists")
+    }
+    
+    // 业务逻辑
+    user := &model.User{
+        Username: req.Username,
+        Email:    req.Email,
+        Role:     model.RoleEditor,
+        Status:   model.UserStatusInactive,
+    }
+    
+    // 调用Repository
+    if err := s.userRepo.Create(ctx, user); err != nil {
+        log.Error().Err(err).Msg("failed to create user")
+        return nil, err
+    }
+    
+    return &RegisterResponse{
+        UserID:   user.ID.Hex(),
+        Username: user.Username,
+        Status:   string(user.Status),
+    }, nil
+}
+```
+
+**禁止**:
+- ❌ 在Service中直接创建Repository实例
+- ❌ Service方法不接受`context.Context`
+- ❌ 缺少业务规则校验
+- ❌ 忽略错误处理和日志
+
+#### 6.3 Repository层优雅实现
+
+**必须遵循**:
+- ✅ 使用依赖注入，通过构造函数注入数据库连接
+- ✅ 所有方法接受`context.Context`作为第一个参数
+- ✅ 统一的错误处理
+- ✅ 自动更新时间戳（`created_at`, `updated_at`）
+- ✅ 使用Model层定义的数据结构
+
+**示例**:
+```go
+// ✅ 正确示例
+type UserRepo struct {
+    collection *mongo.Collection
+}
+
+func NewUserRepo(db *mongo.Database) *UserRepo {
+    return &UserRepo{
+        collection: db.Collection("users"),
+    }
+}
+
+func (r *UserRepo) Create(ctx context.Context, user *model.User) error {
+    user.CreatedAt = time.Now()
+    user.UpdatedAt = time.Now()
+    
+    result, err := r.collection.InsertOne(ctx, user)
+    if err != nil {
+        return err
+    }
+    
+    if oid, ok := result.InsertedID.(primitive.ObjectID); ok {
+        user.ID = oid
+    }
+    return nil
+}
+
+func (r *UserRepo) FindByID(ctx context.Context, id string) (*model.User, error) {
+    objectID, err := primitive.ObjectIDFromHex(id)
+    if err != nil {
+        return nil, err
+    }
+    
+    var user model.User
+    err = r.collection.FindOne(ctx, bson.M{"_id": objectID}).Decode(&user)
+    if err != nil {
+        return nil, err
+    }
+    
+    return &user, nil
+}
+```
+
+**禁止**:
+- ❌ 在Repository中包含业务逻辑
+- ❌ Repository方法不接受`context.Context`
+- ❌ 直接返回数据库错误，不进行转换
+- ❌ 不更新时间戳
+
+#### 6.4 Model层优雅实现
+
+**必须遵循**:
+- ✅ 按模块组织（如`model/auth/`, `model/workflow/`）
+- ✅ 使用BSON和JSON标签
+- ✅ 提供验证方法（如`IsValid()`）
+- ✅ 枚举类型提供`String()`方法
+
+**示例**:
+```go
+// ✅ 正确示例
+// internal/model/auth/user.go
+package auth
+
+type User struct {
+    ID          primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+    Username    string             `bson:"username" json:"username"`
+    Email       string             `bson:"email" json:"email"`
+    Password    string             `bson:"password" json:"-"`
+    Role        UserRole           `bson:"role" json:"role"`
+    Status      UserStatus         `bson:"status" json:"status"`
+    CreatedAt   time.Time          `bson:"created_at" json:"created_at"`
+    UpdatedAt   time.Time          `bson:"updated_at" json:"updated_at"`
+}
+
+type UserRole string
+
+const (
+    RoleAdmin    UserRole = "admin"
+    RoleEditor   UserRole = "editor"
+    RoleReviewer UserRole = "reviewer"
+)
+
+func (r UserRole) IsValid() bool {
+    return r == RoleAdmin || r == RoleEditor || r == RoleReviewer
+}
+
+func (r UserRole) String() string {
+    return string(r)
+}
+```
+
+**禁止**:
+- ❌ Model平铺在`model/`目录下
+- ❌ Model包含业务逻辑
+- ❌ Model依赖其他层
+
+### 7. 检查清单
+
+在完成代码实现后，请检查以下内容：
+
+#### 7.1 Handler层检查
+- [ ] 文件命名符合规范（`{module}/{api_name}.go`，每个API一个文件）
+- [ ] 结构体命名符合规范（`Handler`，放在`{module}/handler.go`中）
+- [ ] 使用依赖注入，通过构造函数注入Service
+- [ ] Handler只调用Service层，不直接调用Repository
+- [ ] Handler不包含业务逻辑，只负责请求/响应转换
+- [ ] **Request/Response DTO定义在Handler层**，不在Model层
+- [ ] **每个API一个文件**，包含该API的Request、Response和Handler方法
+- [ ] 共用的类型放在`{module}/common.go`中
+- [ ] Handler使用DTO（Request/Response），不使用Model实体直接暴露
+- [ ] Handler包含Swagger注释
+- [ ] Handler进行参数验证
+- [ ] 统一的错误处理和响应格式
+- [ ] 使用Context传递（从`gin.Context`获取`context.Context`）
+- [ ] Service层方法使用基本类型参数，不依赖Handler层的Request/Response类型
+
+#### 7.2 Service层检查
+- [ ] 文件命名符合规范（`{module}_service.go`）
+- [ ] 结构体命名符合规范（`{Module}Service`）
+- [ ] 使用依赖注入，通过构造函数注入Repository和外部服务
+- [ ] 所有方法接受`context.Context`作为第一个参数
+- [ ] Service不包含HTTP相关代码
+- [ ] Service通过Repository访问数据库，不直接操作
+- [ ] Service包含业务逻辑和规则校验
+- [ ] Service可以调用多个Repository或外部服务
+- [ ] 统一的错误处理和日志记录
+
+#### 7.3 Repository层检查
+- [ ] 文件命名符合规范（`{module}/{entity}_repo.go`，按模块组织）
+- [ ] 结构体命名符合规范（`{Module}Repo`）
+- [ ] 包名使用模块名（`package auth`, `package resource`等）
+- [ ] 使用依赖注入，通过构造函数注入数据库连接
+- [ ] 所有方法接受`context.Context`作为第一个参数
+- [ ] Repository只负责数据访问，不包含业务逻辑
+- [ ] Repository使用Model层定义的数据结构
+- [ ] Repository不调用Service层
+- [ ] 自动更新时间戳
+- [ ] 统一的错误处理
+
+#### 7.4 Model层检查
+- [ ] 文件命名符合规范（`{module}/{entity}.go`，按模块组织）
+- [ ] 结构体命名符合规范（大驼峰，单数形式）
+- [ ] Model只包含数据结构定义
+- [ ] Model按模块组织（如`model/auth/`）
+- [ ] Model不包含业务逻辑
+- [ ] Model不依赖其他层
+- [ ] 提供验证方法（如`IsValid()`）
+- [ ] 枚举类型提供`String()`方法
+
+#### 7.5 依赖检查
+- [ ] 检查import语句，确保依赖方向正确
+- [ ] 没有循环依赖
+- [ ] Handler不直接import Repository或Model（通过Service）
+- [ ] Service不import Handler
+
+### 8. 常见错误示例
+
+#### ❌ 错误1: Handler直接调用Repository
+```go
+// internal/handler/user.go - 错误示例
+func (h *UserHandler) GetUser(c *gin.Context) {
+    repo := repository.NewUserRepository(db)
+    user, err := repo.FindByID(id)  // ❌ Handler直接调用Repository
+    // ...
+}
+```
+
+#### ✅ 正确: Handler通过Service调用
+```go
+// internal/handler/user.go - 正确示例
+func (h *UserHandler) GetUser(c *gin.Context) {
+    user, err := h.userService.GetUserByID(id)  // ✅ 通过Service
+    // ...
+}
+```
+
+#### ❌ 错误2: Service包含HTTP代码
+```go
+// internal/service/user_service.go - 错误示例
+func (s *UserService) GetUser(id string) (*model.User, error) {
+    c.JSON(200, user)  // ❌ Service不应该包含HTTP代码
+    // ...
+}
+```
+
+#### ✅ 正确: Service只包含业务逻辑
+```go
+// internal/service/user_service.go - 正确示例
+func (s *UserService) GetUserByID(id string) (*model.User, error) {
+    // 业务逻辑
+    user, err := s.repo.FindByID(id)
+    if err != nil {
+        return nil, err
+    }
+    // 业务规则校验
+    if user.Status != model.UserStatusActive {
+        return nil, errors.New("user is not active")
+    }
+    return user, nil
+}
+```
+
+#### ❌ 错误3: Model包含业务逻辑
+```go
+// internal/model/auth/user.go - 错误示例
+func (u *User) GetUser() (*User, error) {
+    // ❌ Model不应该包含业务逻辑
+    repo := repository.NewUserRepository(db)
+    return repo.FindByID(u.ID)
+}
+```
+
+#### ✅ 正确: Model只包含数据结构
+```go
+// internal/model/auth/user.go - 正确示例
+type User struct {
+    ID       primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+    Username string             `bson:"username" json:"username"`
+    // ...
+}
+
+// ✅ 只包含验证方法，不包含业务逻辑
+func (r UserRole) IsValid() bool {
+    return r == RoleAdmin || r == RoleEditor || r == RoleReviewer
+}
+```
+
+#### ❌ 错误4: 文件命名不符合规范
+```go
+// ❌ 错误示例
+// internal/handler/auth_handler.go  // 不应该有_handler后缀
+// internal/service/AuthService.go  // 不应该有大写开头
+// internal/repository/userRepository.go  // 应该是user_repo.go
+// internal/model/user.go  // 应该按模块组织，如model/auth/user.go
+```
+
+#### ✅ 正确: 文件命名符合规范
+```go
+// ✅ 正确示例
+// internal/handler/auth/handler.go    // Handler结构体定义
+// internal/handler/auth/common.go      // 共用的ErrorResponse、UserInfo
+// internal/handler/auth/register.go   // 注册API
+// internal/handler/auth/login.go       // 登录API
+// internal/service/auth_service.go
+// internal/repository/user_repo.go
+// internal/model/auth/user.go
+```
+
+#### ❌ 错误5: Handler中直接创建Service
+```go
+// internal/handler/user.go - 错误示例
+func (h *UserHandler) GetUser(c *gin.Context) {
+    // ❌ 不应该在方法中直接创建Service
+    service := service.NewUserService(repo)
+    user, err := service.GetUserByID(id)
+    // ...
+}
+```
+
+#### ✅ 正确: 使用依赖注入
+```go
+// internal/handler/user.go - 正确示例
+type UserHandler struct {
+    userService *service.UserService  // ✅ 通过构造函数注入
+}
+
+func NewUserHandler(userService *service.UserService) *UserHandler {
+    return &UserHandler{userService: userService}
+}
+
+func (h *UserHandler) GetUser(c *gin.Context) {
+    // ✅ 使用注入的Service
+    user, err := h.userService.GetUserByID(c.Request.Context(), id)
+    // ...
+}
+```
+
+#### ❌ 错误6: Service方法不接受Context
+```go
+// internal/service/user_service.go - 错误示例
+func (s *UserService) GetUserByID(id string) (*model.User, error) {
+    // ❌ 方法不接受context.Context
+    return s.repo.FindByID(id)
+}
+```
+
+#### ✅ 正确: Service方法接受Context
+```go
+// internal/service/user_service.go - 正确示例
+func (s *UserService) GetUserByID(ctx context.Context, id string) (*model.User, error) {
+    // ✅ 方法接受context.Context作为第一个参数
+    return s.repo.FindByID(ctx, id)
+}
+```
+
+### 9. 自动检查方法
+
+在完成代码后，执行以下检查：
+
+1. **检查import依赖**:
+   ```bash
+   # 检查Handler是否直接import Repository
+   grep -r "repository" internal/handler/ | grep -v "service"
+   
+   # 检查Service是否import Handler
+   grep -r "handler" internal/service/
+   ```
+
+2. **检查循环依赖**:
+   ```bash
+   go list -json all | jq -r '.ImportPath' | xargs -I {} go list -f '{{.ImportPath}} -> {{.Imports}}' {}
+   ```
+
+3. **检查Model层组织**:
+   ```bash
+   # Model应该按模块组织，不应该平铺
+   ls -la internal/model/
+   # 应该看到: auth/, workflow/ 等模块目录
+   # 不应该看到: user.go, refresh_token.go 等平铺文件
+   ```
+
+4. **检查文件命名规范**:
+   ```bash
+   # 检查Handler文件命名
+   ls internal/handler/ | grep -E ".*_handler\.go|.*Handler\.go"
+   # 应该为空（不应该有_handler.go或Handler.go）
+   
+   # 检查Service文件命名
+   ls internal/service/ | grep -v "_service.go$"
+   # 应该为空（所有文件都应该以_service.go结尾）
+   
+   # 检查Repository文件命名
+   ls internal/repository/ | grep -v "_repo.go$"
+   # 应该为空（所有文件都应该以_repo.go结尾）
+   ```
+
+5. **检查依赖注入**:
+   ```bash
+   # 检查Handler是否在方法中直接创建Service
+   grep -r "New.*Service\|New.*Repo" internal/handler/
+   # 应该为空（Handler不应该直接创建Service或Repo）
+   
+   # 检查Service是否在方法中直接创建Repository
+   grep -r "New.*Repo" internal/service/
+   # 应该为空（Service不应该直接创建Repository）
+   ```
+
+### 10. 修复建议
+
+如果发现违反分层要求的代码：
+
+1. **Handler直接调用Repository**:
+   - 创建对应的Service方法
+   - Handler改为调用Service
+
+2. **Service包含HTTP代码**:
+   - 移除HTTP相关代码
+   - 返回业务对象，由Handler处理HTTP响应
+
+3. **Model包含业务逻辑**:
+   - 将业务逻辑移到Service层
+   - Model只保留数据结构和验证方法
+
+4. **依赖方向错误**:
+   - 重构代码，确保依赖方向正确
+   - 使用依赖注入避免循环依赖
+
+## 执行时机
+
+**每次完成以下操作后，必须执行分层检查**:
+- ✅ 完成一个Handler的实现
+- ✅ 完成一个Service的实现
+- ✅ 完成一个Repository的实现
+- ✅ 完成一个Model的定义
+- ✅ 重构代码后
+- ✅ 提交代码前
+
+## 参考文档
+
+- [开发规范文档](../docs/guide/DEVELOPMENT_RULES.md)
+- [架构设计文档](../docs/design/workflow/ARCHITECTURE.md)

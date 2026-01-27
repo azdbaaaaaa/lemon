@@ -90,7 +90,7 @@ func initConfig() {
 func setDefaults() {
 	// Server
 	viper.SetDefault("server.host", "0.0.0.0")
-	viper.SetDefault("server.port", 8080)
+	viper.SetDefault("server.port", 7080)
 	viper.SetDefault("server.mode", "release")
 	viper.SetDefault("server.read_timeout", "30s")
 	viper.SetDefault("server.write_timeout", "30s")

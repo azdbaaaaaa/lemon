@@ -132,6 +132,12 @@ docker-logs:
 wire:
 	wire ./internal/...
 
+# 生成 Swagger 文档
+swagger:
+	@echo "Generating Swagger documentation..."
+	swag init -g main.go -o docs/swagger
+	@echo "Swagger documentation generated successfully!"
+
 # 初始化 git 仓库
 git-init:
 	git init

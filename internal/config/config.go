@@ -7,11 +7,13 @@ import (
 
 // Config 应用配置根结构
 type Config struct {
-	Server ServerConfig `mapstructure:"server"`
-	AI     AIConfig     `mapstructure:"ai"`
-	Log    LogConfig    `mapstructure:"log"`
-	Mongo  MongoConfig  `mapstructure:"mongo"`
-	Redis  RedisConfig  `mapstructure:"redis"`
+	Server  ServerConfig  `mapstructure:"server"`
+	AI      AIConfig      `mapstructure:"ai"`
+	Log     LogConfig     `mapstructure:"log"`
+	Mongo   MongoConfig   `mapstructure:"mongo"`
+	Redis   RedisConfig   `mapstructure:"redis"`
+	Auth    AuthConfig    `mapstructure:"auth"`
+	Storage StorageConfig `mapstructure:"storage"`
 }
 
 // ServerConfig HTTP 服务器配置
@@ -61,6 +63,36 @@ type RedisConfig struct {
 	Addr     string `mapstructure:"addr"`
 	Password string `mapstructure:"password"`
 	DB       int    `mapstructure:"db"`
+}
+
+// AuthConfig 认证配置
+type AuthConfig struct {
+	JWTSecret          string        `mapstructure:"jwt_secret"`           // JWT密钥
+	AccessTokenExpiry  time.Duration `mapstructure:"access_token_expiry"`  // Access Token过期时间
+	RefreshTokenExpiry time.Duration `mapstructure:"refresh_token_expiry"` // Refresh Token过期时间
+}
+
+// StorageConfig 存储配置
+type StorageConfig struct {
+	Type  string       `mapstructure:"type"` // local, oss, s3, minio
+	Local *LocalConfig `mapstructure:"local,omitempty"`
+	OSS   *OSSConfig   `mapstructure:"oss,omitempty"`
+}
+
+// LocalConfig 本地文件系统配置
+type LocalConfig struct {
+	BasePath      string `mapstructure:"base_path"`      // 基础路径
+	BaseURL       string `mapstructure:"base_url"`       // 基础URL（用于生成访问URL）
+	PresignExpiry int    `mapstructure:"presign_expiry"` // 预签名URL过期时间（秒）
+}
+
+// OSSConfig 阿里云OSS配置
+type OSSConfig struct {
+	Endpoint        string `mapstructure:"endpoint"`          // OSS端点
+	Bucket          string `mapstructure:"bucket"`            // Bucket名称
+	AccessKeyID     string `mapstructure:"access_key_id"`     // AccessKey ID
+	AccessKeySecret string `mapstructure:"access_key_secret"` // AccessKey Secret
+	PresignExpiry   int    `mapstructure:"presign_expiry"`    // 预签名URL过期时间（秒）
 }
 
 // Validate 验证配置有效性

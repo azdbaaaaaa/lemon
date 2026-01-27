@@ -1,4 +1,4 @@
-# Binaries
+# Binaries for programs and plugins
 bin/
 dist/
 *.exe
@@ -7,24 +7,40 @@ dist/
 *.so
 *.dylib
 
-# Test binary
+# Test binary, built with `go test -c`
 *.test
 
-# Output of go coverage
+# Output of the go coverage tool
 *.out
 coverage.html
 coverage.txt
+coverage.xml
 
-# Go workspace
+# Go workspace file
 go.work
 go.work.sum
 
 # Dependency directories
 vendor/
 
-# IDE
-.idea/
+# Build artifacts
+lemon
+lemon.exe
+*.pid
+*.a
+
+# IDE - VSCode
 .vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# IDE - GoLand
+.idea/
+*.iml
+
+# IDE - Other
 *.swp
 *.swo
 *~
@@ -43,6 +59,7 @@ Thumbs.db
 # Logs
 logs/
 *.log
+*.log.*
 
 # Environment & Secrets
 .env
@@ -50,28 +67,33 @@ logs/
 !.env.example
 *.pem
 *.key
+*.crt
+*.csr
 credentials.json
+secrets.yaml
 
 # Config with secrets (keep examples)
 configs/config.local.yaml
 configs/config.prod.yaml
 configs/config.*.local.yaml
+!configs/config.yaml
+!configs/config.example.yaml
 
 # Temporary files
 tmp/
 temp/
 .tmp/
+*.tmp
 
 # Debug
 debug
 __debug_bin
 *.prof
+*.pprof
 
 # Air live reload
 .air.toml.tmp
-
-# Build artifacts
-*.pid
+tmp/
 
 # Test cache
 .testcache/
@@ -83,3 +105,28 @@ wire_gen.go
 *.db
 *.sqlite
 *.sqlite3
+
+# Swagger generated files (optional - uncomment if you want to ignore swagger files)
+# docs/swagger/
+# docs/swagger/*.go
+# docs/swagger/*.json
+# docs/swagger/*.yaml
+
+# Docker
+.dockerignore
+
+# Kubernetes
+*.kubeconfig
+
+# Local development
+.local/
+local/
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Coverage reports
+coverage/
+*.coverprofile

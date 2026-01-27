@@ -23,6 +23,7 @@ linters:
     - ineffassign    # 检测无效赋值
     - staticcheck    # 静态分析
     - unused         # 检查未使用的代码
+    # typecheck 已包含在 govet 中，不需要单独启用
 
     # 额外启用
     - bodyclose      # 检查 HTTP response body 是否关闭
@@ -54,6 +55,7 @@ linters:
     - gochecknoinits    # init 函数检查 (有时需要)
     - godot          # 注释句号检查 (太严格)
     - lll            # 行长度检查 (太严格)
+    - typecheck      # 类型检查 (go build 已覆盖，lint 工具可能有误报)
     - wsl            # 空白行检查 (太严格)
     - wrapcheck      # 错误包装检查 (太严格)
 
@@ -185,6 +187,14 @@ issues:
     - linters:
         - errcheck
       text: "viper.BindPFlag"
+
+    # 忽略 typecheck 对第三方包的误报（go build 已正确验证）
+    - linters:
+        - typecheck
+      path: internal/pkg/jwt
+    - linters:
+        - typecheck
+      path: internal/pkg/cache
 
   exclude-dirs:
     - vendor

@@ -4,7 +4,7 @@
 
 server:
   host: "0.0.0.0"
-  port: 8080
+  port: 7080
   mode: "debug"           # debug, release, test
   read_timeout: 30s
   write_timeout: 30s
@@ -36,3 +36,21 @@ redis:
   addr: "localhost:6379"
   password: ""
   db: 0
+
+auth:
+  jwt_secret: "your-secret-key-change-in-production"  # JWT密钥（生产环境必须修改）
+  access_token_expiry: 24h                             # Access Token过期时间
+  refresh_token_expiry: 168h                           # Refresh Token过期时间（7天）
+
+storage:
+  type: "local"  # 存储类型：local, oss, s3, minio
+  local:
+    base_path: "./storage"           # 本地存储基础路径
+    base_url: "http://localhost:7080/storage"  # 本地存储基础URL
+    presign_expiry: 3600            # 预签名URL过期时间（秒）
+  # oss:
+  #   endpoint: "oss-cn-hangzhou.aliyuncs.com"  # OSS端点
+  #   bucket: "your-bucket-name"                # Bucket名称
+  #   access_key_id: "your-access-key-id"       # AccessKey ID
+  #   access_key_secret: "your-access-key-secret" # AccessKey Secret
+  #   presign_expiry: 3600                      # 预签名URL过期时间（秒）
