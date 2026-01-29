@@ -214,7 +214,9 @@ func TestBuildChapterNarrationPrompt(t *testing.T) {
 			So(prompt, ShouldContainSubstring, "---- BEGIN CHAPTER ----")
 			So(prompt, ShouldContainSubstring, "---- END CHAPTER ----")
 			So(prompt, ShouldContainSubstring, "第三人称口播风格")
-			So(prompt, ShouldContainSubstring, "200~400 字")
+			So(prompt, ShouldContainSubstring, "只返回纯 JSON")
+			So(prompt, ShouldContainSubstring, "不要使用 markdown 代码块标记")
+			So(prompt, ShouldContainSubstring, "1100-1300字")
 		})
 
 		Convey("提示词格式应正确", func() {

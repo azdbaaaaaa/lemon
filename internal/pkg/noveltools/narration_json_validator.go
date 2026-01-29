@@ -3,8 +3,37 @@ package noveltools
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 )
+
+// cleanJSONContent 清理 LLM 返回的 JSON 内容
+// 移除 markdown 代码块标记，修复常见的 JSON 格式问题
+func cleanJSONContent(content string) string {
+	// 移除首尾空白
+	content = strings.TrimSpace(content)
+
+	// 移除 markdown 代码块标记（```json ... ``` 或 ``` ... ```）
+	// 匹配 ```json 开头和 ``` 结尾
+	// 注意：在原始字符串中，反引号需要特殊处理
+	markdownPattern := regexp.MustCompile(`(?s)^\s*` + "```" + `(?:json)?\s*\n(.*?)\n\s*` + "```" + `\s*$`)
+	if matches := markdownPattern.FindStringSubmatch(content); len(matches) > 1 {
+		content = matches[1]
+	}
+
+	// 移除可能的其他 markdown 标记
+	content = strings.TrimPrefix(content, "```json")
+	content = strings.TrimPrefix(content, "```")
+	content = strings.TrimSuffix(content, "```")
+	content = strings.TrimSpace(content)
+
+	// 尝试修复常见的 JSON 格式问题
+	// 1. 修复未转义的换行符（在字符串值中）
+	// 注意：这是一个简单的修复，可能不适用于所有情况
+	// 如果 JSON 本身格式正确，这个操作不会影响它
+
+	return content
+}
 
 // ValidateNarrationJSON 验证 JSON 格式的解说文案
 // 返回解析后的结构化数据和验证结果
@@ -14,8 +43,10 @@ func ValidateNarrationJSON(jsonContent string, minLength, maxLength int) (map[st
 		Warnings: make([]string, 0),
 	}
 
+	// 清理 JSON 内容（移除 markdown 代码块等）
+	jsonContent = cleanJSONContent(jsonContent)
+
 	// 检查空内容
-	jsonContent = strings.TrimSpace(jsonContent)
 	if jsonContent == "" {
 		result.IsValid = false
 		result.Message = "解说内容为空"

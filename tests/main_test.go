@@ -90,6 +90,17 @@ func TestMain(m *testing.M) {
 	// 3. 初始化 LLM Provider（从环境变量读取配置）
 	var llmProvider noveltools.LLMProvider
 	apiKey := os.Getenv("ARK_API_KEY")
+	fmt.Fprintf(os.Stderr, "[TestMain] 读取 ARK_API_KEY: %s (长度: %d)\n",
+		func() string {
+			if apiKey == "" {
+				return "未设置"
+			}
+			if len(apiKey) > 8 {
+				return apiKey[:8] + "..."
+			}
+			return apiKey
+		}(), len(apiKey))
+
 	if apiKey != "" {
 		aiCfg := &config.AIConfig{
 			Provider: "ark",
@@ -104,15 +115,17 @@ func TestMain(m *testing.M) {
 			aiCfg.BaseURL = "https://ark.cn-beijing.volces.com/api/v3"
 		}
 
+		fmt.Fprintf(os.Stderr, "[TestMain] 尝试创建 Ark 客户端: Model=%s, BaseURL=%s\n",
+			aiCfg.Model, aiCfg.BaseURL)
 		arkClient, err := ark.NewClient(aiCfg)
 		if err == nil {
 			llmProvider = providers.NewArkProvider(arkClient)
-			fmt.Fprintf(os.Stderr, "已初始化真实的 LLM Provider (Ark)\n")
+			fmt.Fprintf(os.Stderr, "[TestMain] ✓ 已初始化真实的 LLM Provider (Ark)\n")
 		} else {
-			fmt.Fprintf(os.Stderr, "警告: 初始化 LLM Provider 失败: %v，将使用 nil\n", err)
+			fmt.Fprintf(os.Stderr, "[TestMain] ✗ 初始化 LLM Provider 失败: %v，将使用 nil\n", err)
 		}
 	} else {
-		fmt.Fprintf(os.Stderr, "警告: ARK_API_KEY 未设置，LLM Provider 为 nil（某些测试可能需要）\n")
+		fmt.Fprintf(os.Stderr, "[TestMain] ✗ ARK_API_KEY 未设置，LLM Provider 为 nil（某些测试可能需要）\n")
 	}
 
 	// 4. 初始化测试服务

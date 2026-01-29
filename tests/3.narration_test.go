@@ -15,6 +15,8 @@
 package tests
 
 import (
+	"encoding/json"
+	"os"
 	"testing"
 
 	. "github.com/smartystreets/goconvey/convey"
@@ -37,6 +39,11 @@ func TestNovelService_GenerateNarration(t *testing.T) {
 		Convey("步骤2: 为章节生成解说文案", func() {
 			// 检查是否有 LLM Provider
 			if services.LLMProvider == nil {
+				// 检查环境变量是否设置（用于调试）
+				apiKey := os.Getenv("ARK_API_KEY")
+				if apiKey != "" {
+					t.Fatalf("ARK_API_KEY 已设置但 LLM Provider 为 nil，可能是初始化失败。请检查 TestMain 的错误日志。")
+				}
 				t.Skip("跳过测试：ARK_API_KEY 未设置，无法使用真实的 LLM Provider")
 			}
 
@@ -60,8 +67,28 @@ func TestNovelService_GenerateNarration(t *testing.T) {
 
 				// 验证包含必要的字段
 				So(narrationEntity.Content["scenes"], ShouldNotBeNil)
-				scenes, ok := narrationEntity.Content["scenes"].([]interface{})
-				So(ok, ShouldBeTrue)
+
+				// MongoDB 可能返回不同的类型，需要更灵活的类型检查
+				scenesValue := narrationEntity.Content["scenes"]
+				So(scenesValue, ShouldNotBeNil)
+
+				// 尝试多种类型断言
+				var scenes []interface{}
+				switch v := scenesValue.(type) {
+				case []interface{}:
+					scenes = v
+				case []map[string]interface{}:
+					// 转换为 []interface{}
+					scenes = make([]interface{}, len(v))
+					for i, item := range v {
+						scenes[i] = item
+					}
+				default:
+					// 尝试通过 JSON 序列化/反序列化来转换类型
+					jsonBytes, _ := json.Marshal(scenesValue)
+					json.Unmarshal(jsonBytes, &scenes)
+				}
+
 				So(len(scenes), ShouldBeGreaterThan, 0)
 			})
 
@@ -85,7 +112,28 @@ func TestNovelService_GenerateNarration(t *testing.T) {
 
 					// 验证内容为结构化数据
 					So(narrationEntity.Content, ShouldNotBeNil)
-					So(narrationEntity.Content["scenes"], ShouldNotBeNil)
+
+					// 验证 scenes 字段存在（使用灵活的类型检查）
+					scenesValue := narrationEntity.Content["scenes"]
+					So(scenesValue, ShouldNotBeNil)
+
+					// 尝试多种类型断言
+					var scenes []interface{}
+					switch v := scenesValue.(type) {
+					case []interface{}:
+						scenes = v
+					case []map[string]interface{}:
+						// 转换为 []interface{}
+						scenes = make([]interface{}, len(v))
+						for i, item := range v {
+							scenes[i] = item
+						}
+					default:
+						// 尝试通过 JSON 序列化/反序列化来转换类型
+						jsonBytes, _ := json.Marshal(scenesValue)
+						json.Unmarshal(jsonBytes, &scenes)
+					}
+					So(len(scenes), ShouldBeGreaterThan, 0)
 				}
 			})
 		})

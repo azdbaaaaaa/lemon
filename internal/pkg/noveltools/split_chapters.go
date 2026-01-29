@@ -16,21 +16,42 @@ type ChapterSegment struct {
 type ChapterSplitter struct {
 	// 默认目标章节数（当 targetChapters <= 0 时使用）
 	defaultTargetChapters int
+	// 是否合并章节（当章节数超过目标章节数时）
+	// true: 合并章节（将多个章节合并为一个）
+	// false: 只保留前N章（默认）
+	mergeWhenTooMany bool
+	// 最小章节长度（字符数），小于此长度的章节会被过滤
+	// 0 表示只要不为空就保留（默认）
+	minChapterLength int
 }
 
 // NewChapterSplitter 创建章节切分器实例
 func NewChapterSplitter() *ChapterSplitter {
 	return &ChapterSplitter{
 		defaultTargetChapters: 50,
+		mergeWhenTooMany:      false, // 默认不合并，只保留前N章
+		minChapterLength:      0,     // 默认只要不为空就保留
 	}
+}
+
+// SetMergeWhenTooMany 设置是否在章节数过多时合并章节
+func (cs *ChapterSplitter) SetMergeWhenTooMany(merge bool) {
+	cs.mergeWhenTooMany = merge
+}
+
+// SetMinChapterLength 设置最小章节长度（字符数）
+// 小于此长度的章节会被过滤
+// 0 表示只要不为空就保留（默认）
+func (cs *ChapterSplitter) SetMinChapterLength(length int) {
+	cs.minChapterLength = length
 }
 
 // Split 将小说内容切分为若干章节
 //
-// 逻辑参考 Python 版 split_novel_into_chapters：
+// 逻辑：
 //  1. 先按常见章节标题模式切分（第X章 / Chapter N / 章节 N）
-//  2. 若无法识别章节标题，则按长度平均切分为 targetChapters 段
-//  3. 若切分结果超过 targetChapters，则按长度合并
+//  2. 若识别到章节标题，保持一章一章切分，如果章节数超过 targetChapters，只保留前 targetChapters 章
+//  3. 若无法识别章节标题，则按长度平均切分为 targetChapters 段
 //
 // Args:
 //   - novelContent: 小说原始内容
@@ -47,11 +68,22 @@ func (cs *ChapterSplitter) Split(novelContent string, targetChapters int) []Chap
 		targetChapters = cs.defaultTargetChapters
 	}
 
-	if chunks := splitByChapterTitles(novelContent); len(chunks) >= 2 {
-		chunks = mergeIfTooMany(chunks, targetChapters)
+	if chunks := splitByChapterTitles(novelContent, cs.minChapterLength); len(chunks) >= 2 {
+		// 如果识别到章节标题，保持一章一章切分
+		// 如果章节数超过 targetChapters，根据配置决定是合并还是截取
+		if len(chunks) > targetChapters {
+			if cs.mergeWhenTooMany {
+				// 合并章节
+				chunks = mergeIfTooMany(chunks, targetChapters)
+			} else {
+				// 只保留前 targetChapters 章（默认行为）
+				chunks = chunks[:targetChapters]
+			}
+		}
 		return wrapSegments(chunks)
 	}
 
+	// 无法识别章节标题时，按长度平均切分
 	chunks := splitByLength(novelContent, targetChapters)
 	return wrapSegments(chunks)
 }
@@ -84,7 +116,7 @@ var chapterTitlePatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?im)^章节\s*\d+[^\n]*`),
 }
 
-func splitByChapterTitles(novelContent string) []string {
+func splitByChapterTitles(novelContent string, minLength int) []string {
 	var matches []int
 	for _, re := range chapterTitlePatterns {
 		idxs := re.FindAllStringIndex(novelContent, -1)
@@ -108,8 +140,17 @@ func splitByChapterTitles(novelContent string) []string {
 			end = matches[i+1]
 		}
 		ch := strings.TrimSpace(novelContent[start:end])
-		if len([]rune(ch)) > 100 {
-			chapters = append(chapters, ch)
+		// 根据配置的最小长度检查章节
+		if ch != "" {
+			if minLength > 0 {
+				// 如果设置了最小长度，检查章节长度
+				if len([]rune(ch)) >= minLength {
+					chapters = append(chapters, ch)
+				}
+			} else {
+				// 默认：只要不为空就保留
+				chapters = append(chapters, ch)
+			}
 		}
 	}
 	return chapters
@@ -141,6 +182,9 @@ func splitByLength(novelContent string, targetChapters int) []string {
 	return chapters
 }
 
+// mergeIfTooMany 合并章节（当章节数超过目标章节数时）
+// 将多个章节按长度合并，使最终章节数接近目标章节数
+// 注意：此函数只在 ChapterSplitter.mergeWhenTooMany = true 时使用
 func mergeIfTooMany(chapters []string, targetChapters int) []string {
 	if targetChapters <= 0 || len(chapters) <= targetChapters {
 		return chapters

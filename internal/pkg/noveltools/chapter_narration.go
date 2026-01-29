@@ -82,12 +82,18 @@ func buildChapterNarrationPrompt(chapterContent string, chapterNum, totalChapter
 	b.WriteString("你是一名专业的中文小说解说文案撰写助手。\n")
 	b.WriteString("请基于下面给出的章节内容，生成适合短视频解说的结构化解说文案。\n\n")
 
-	b.WriteString("要求：\n")
+	b.WriteString("【重要输出格式要求】\n")
+	b.WriteString("1. 必须只返回纯 JSON 格式的内容，不要添加任何其他文字\n")
+	b.WriteString("2. 不要使用 markdown 代码块标记（不要使用 ```json 或 ```）\n")
+	b.WriteString("3. 不要添加任何解释、说明或注释\n")
+	b.WriteString("4. 直接以 { 开头，以 } 结尾\n")
+	b.WriteString("5. 确保 JSON 格式完全正确，可以直接被 JSON 解析器解析\n\n")
+
+	b.WriteString("【内容要求】\n")
 	b.WriteString("1. 必须生成至少7个分镜，每个分镜包含解说内容和图片描述\n")
 	b.WriteString("2. 解说内容总字数必须达到1100-1300字（中文字符）\n")
 	b.WriteString("3. 使用第三人称口播风格，语言自然、口语化\n")
-	b.WriteString("4. 不要剧透后续章节，只围绕当前章节的内容\n")
-	b.WriteString("5. 必须严格按照 JSON 格式输出，不要添加任何解释文字\n\n")
+	b.WriteString("4. 不要剧透后续章节，只围绕当前章节的内容\n\n")
 
 	fmt.Fprintf(&b, "当前进度：第 %d 章 / 共 %d 章。\n\n", chapterNum, totalChapters)
 	b.WriteString("下面是本章节的原始内容：\n")
@@ -95,7 +101,8 @@ func buildChapterNarrationPrompt(chapterContent string, chapterNum, totalChapter
 	b.WriteString(chapterContent)
 	b.WriteString("\n---- END CHAPTER ----\n\n")
 
-	b.WriteString("请严格按照以下 JSON 格式输出（只输出 JSON，不要任何其他文字）：\n")
+	b.WriteString("【输出格式示例】\n")
+	b.WriteString("请严格按照以下 JSON 格式输出，直接输出 JSON 内容，不要任何其他文字：\n")
 	b.WriteString(`{
   "chapter_info": {
     "chapter_number": `)
@@ -127,7 +134,11 @@ func buildChapterNarrationPrompt(chapterContent string, chapterNum, totalChapter
     }
   ]
 }`)
-	b.WriteString("\n\n注意：必须确保解说内容总字数在1100-1300字之间，且至少有7个分镜。\n")
+	b.WriteString("\n\n【再次强调】\n")
+	b.WriteString("1. 只返回 JSON 内容，不要任何 markdown 代码块标记\n")
+	b.WriteString("2. 不要添加任何解释文字，直接输出 JSON\n")
+	b.WriteString("3. 确保解说内容总字数在1100-1300字之间，且至少有7个分镜\n")
+	b.WriteString("4. 输出必须以 { 开头，以 } 结尾\n")
 
 	return b.String()
 }

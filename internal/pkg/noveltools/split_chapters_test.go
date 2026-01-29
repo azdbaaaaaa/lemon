@@ -93,7 +93,7 @@ This is chapter 2 content.`
 			}
 		})
 
-		Convey("章节数过多时会合并", func() {
+		Convey("章节数过多时只保留前N章", func() {
 			content := `第一章
 内容1
 
@@ -111,7 +111,10 @@ This is chapter 2 content.`
 
 			result := splitter.Split(content, 2)
 			So(result, ShouldNotBeNil)
-			So(len(result), ShouldBeLessThanOrEqualTo, 2)
+			So(len(result), ShouldEqual, 2)
+			// 验证保留的是前2章
+			So(result[0].Text, ShouldContainSubstring, "第一章")
+			So(result[1].Text, ShouldContainSubstring, "第二章")
 		})
 
 		Convey("每个章节应包含标题和正文", func() {
