@@ -14,8 +14,8 @@ import (
 
 // OSSStorage 阿里云OSS存储
 type OSSStorage struct {
-	bucket       *oss.Bucket
-	bucketName   string
+	bucket        *oss.Bucket
+	bucketName    string
 	presignExpiry int // 预签名URL过期时间（秒）
 }
 
@@ -34,8 +34,8 @@ func NewOSSStorage(endpoint, bucketName, accessKeyID, accessKeySecret string, pr
 	}
 
 	return &OSSStorage{
-		bucket:       bucket,
-		bucketName:   bucketName,
+		bucket:        bucket,
+		bucketName:    bucketName,
 		presignExpiry: presignExpiry,
 	}, nil
 }

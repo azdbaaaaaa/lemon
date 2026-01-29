@@ -44,7 +44,7 @@ func (h *Handler) Register(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	
+
 	// 调用Service层（传递基本类型参数，不依赖Handler层的Request类型）
 	resp, err := h.authService.Register(ctx, req.Username, req.Email, req.Password, req.Nickname)
 	if err != nil {

@@ -1,0 +1,40 @@
+# Cursor Rules for Lemon Project
+
+## Code Style and Best Practices
+
+### Function Length
+- **原则：一个函数不要超过80行**
+- 如果函数超过80行，应该考虑拆分为多个更小的函数
+- 每个函数应该只做一件事，保持单一职责原则
+- 长函数应该拆分为：
+  - 验证逻辑 → 独立的验证函数
+  - 业务逻辑 → 独立的业务函数
+  - 数据处理 → 独立的数据处理函数
+  - 错误处理 → 统一的错误处理函数
+
+### Code Organization
+- 保持函数简洁，职责单一
+- 使用有意义的函数名，清晰表达函数意图
+- 优先使用组合而非继承
+- 避免深层嵌套，保持代码扁平化
+
+### Error Handling
+- 使用明确的错误类型
+- 错误信息应该清晰、可操作
+- 在适当的地方记录错误日志
+
+### Documentation
+- 公共函数必须有注释
+- 复杂逻辑必须有注释说明
+- 使用 Go 标准的注释格式
+
+### Testing
+- **单元测试统一使用 GoConvey（`github.com/smartystreets/goconvey/convey`）**
+- **原则上不要在本项目新增 `testify` 风格的用例**（保持断言/组织方式统一）
+- Convey 规范建议：
+  - 顶层使用 `Convey("...", t, func() { ... })`
+  - 子场景用嵌套 `Convey(...)`
+  - 断言用 `So(x, ShouldXXX, ...)`
+- **写完单元测试用例后必须运行测试确保通过**（使用 `go test ./path/to/package -v` 运行）
+- 如果测试失败，必须修复后再提交
+

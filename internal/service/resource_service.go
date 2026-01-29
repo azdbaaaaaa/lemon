@@ -127,6 +127,33 @@ type CompleteUploadResult struct {
 // CompleteUpload 完成上传（确认上传完成）
 // 客户端上传完成后，验证文件并创建资源记录
 func (s *ResourceService) CompleteUpload(ctx context.Context, req *CompleteUploadRequest) (*CompleteUploadResult, error) {
+	// 验证会话、保存原始资源并更新会话状态
+	originalRes, err := s.createOriginalResource(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	// 生成资源访问URL（使用原始资源）
+	resourceURL, err := s.storage.GetPresignedDownloadURL(ctx, originalRes.StorageKey, time.Hour*24)
+	if err != nil {
+		log.Warn().Err(err).Msg("failed to generate resource URL")
+		// 不影响主流程，返回空URL
+		resourceURL = ""
+	}
+
+	// 异步执行后续处理链（脱敏等处理），不阻塞主流程
+	go s.processResourceChain(context.Background(), originalRes.ID)
+
+	return &CompleteUploadResult{
+		ResourceID:  originalRes.ID,
+		ResourceURL: resourceURL,
+		FileSize:    originalRes.FileSize,
+	}, nil
+}
+
+// createOriginalResource 验证会话并创建原始资源记录
+// 创建成功后会自动更新上传会话状态为已完成
+func (s *ResourceService) createOriginalResource(ctx context.Context, req *CompleteUploadRequest) (*resource.Resource, error) {
 	// 查找上传会话
 	session, err := s.resourceRepo.FindUploadSession(ctx, req.SessionID)
 	if err != nil {
@@ -135,7 +162,6 @@ func (s *ResourceService) CompleteUpload(ctx context.Context, req *CompleteUploa
 
 	// 检查会话是否过期
 	if time.Now().After(session.ExpiresAt) {
-		// 更新会话状态为已过期
 		_ = s.resourceRepo.UpdateUploadSession(ctx, req.SessionID, map[string]interface{}{
 			"status": resource.UploadStatusExpired,
 		})
@@ -170,23 +196,17 @@ func (s *ResourceService) CompleteUpload(ctx context.Context, req *CompleteUploa
 			Int64("expected", session.FileSize).
 			Int64("actual", fileInfo.Size).
 			Msg("file size mismatch")
-		// 更新会话状态为失败
 		_ = s.resourceRepo.UpdateUploadSession(ctx, req.SessionID, map[string]interface{}{
 			"status": resource.UploadStatusFailed,
 		})
 		return nil, errors.New("文件大小不匹配")
 	}
 
-	// 验证文件哈希（如果提供了）
-	// 注意：这里简化处理，实际应该从存储服务获取文件的ETag或MD5进行验证
-	// 由于不同存储服务的哈希值格式可能不同，这里先跳过详细验证
-	// 可以在后续版本中根据存储类型进行相应验证
-
 	// 生成资源ID
 	resourceID := id.New()
 
-	// 创建资源记录
-	res := &resource.Resource{
+	// 创建原始资源记录（保留原始文件）
+	originalRes := &resource.Resource{
 		ID:          resourceID,
 		UserID:      session.UserID,
 		Ext:         session.Ext,
@@ -201,13 +221,13 @@ func (s *ResourceService) CompleteUpload(ctx context.Context, req *CompleteUploa
 		Status:      resource.ResourceStatusReady,
 	}
 
-	// 保存资源
-	if err := s.resourceRepo.Create(ctx, res); err != nil {
+	// 保存原始资源
+	if err := s.resourceRepo.Create(ctx, originalRes); err != nil {
 		log.Error().Err(err).Msg("failed to create resource")
 		return nil, errors.New("创建资源失败")
 	}
 
-	// 更新上传会话状态
+	// 更新上传会话状态为已完成（原始资源创建成功后，上传即完成）
 	if err := s.resourceRepo.UpdateUploadSession(ctx, req.SessionID, map[string]interface{}{
 		"status":         resource.UploadStatusCompleted,
 		"resource_id":    resourceID,
@@ -217,19 +237,22 @@ func (s *ResourceService) CompleteUpload(ctx context.Context, req *CompleteUploa
 		// 不影响主流程，只记录警告
 	}
 
-	// 生成资源访问URL
-	resourceURL, err := s.storage.GetPresignedDownloadURL(ctx, session.UploadKey, time.Hour*24)
-	if err != nil {
-		log.Warn().Err(err).Msg("failed to generate resource URL")
-		// 不影响主流程，返回空URL
-		resourceURL = ""
-	}
+	log.Info().
+		Str("resource_id", resourceID).
+		Str("storage_key", session.UploadKey).
+		Int64("file_size", fileInfo.Size).
+		Msg("原始资源创建成功，上传会话已更新")
 
-	return &CompleteUploadResult{
-		ResourceID:  resourceID,
-		ResourceURL: resourceURL,
-		FileSize:    fileInfo.Size,
-	}, nil
+	return originalRes, nil
+}
+
+// processResourceChain 执行资源处理链（脱敏等处理）
+// processResourceChain 原先用于异步执行资源处理链（脱敏、章节切分等）。
+// 目前资源处理链已改为在 service 层显式调用纯函数，因此该方法留空或后续重构为具体业务流程。
+func (s *ResourceService) processResourceChain(ctx context.Context, resourceID string) {
+	// TODO: 在需要时，这里可以显式调用脱敏、章节切分等纯函数工具。
+	_ = ctx
+	_ = resourceID
 }
 
 // GetDownloadURLRequest 获取下载URL请求

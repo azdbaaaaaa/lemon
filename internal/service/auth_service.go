@@ -83,7 +83,7 @@ func (s *AuthService) Register(ctx context.Context, username, email, pwd, nickna
 		Username: username,
 		Email:    email,
 		Password: hashedPassword,
-		Role:     auth.RoleEditor, // 新注册用户默认为editor
+		Role:     auth.RoleEditor,         // 新注册用户默认为editor
 		Status:   auth.UserStatusInactive, // 新注册用户需要管理员审核
 	}
 

@@ -6,7 +6,6 @@ import (
 
 	"lemon/internal/config"
 	"lemon/internal/pkg/storage"
-	"lemon/internal/pkg/storage/local"
 	"lemon/internal/pkg/storage/oss"
 )
 
@@ -14,14 +13,8 @@ import (
 func NewStorage(ctx context.Context, cfg *config.StorageConfig) (storage.Storage, error) {
 	switch cfg.Type {
 	case "local":
-		if cfg.Local == nil {
-			return nil, fmt.Errorf("local storage config is required")
-		}
-		return local.NewLocalStorage(
-			cfg.Local.BasePath,
-			cfg.Local.BaseURL,
-			cfg.Local.PresignExpiry,
-		)
+		// TODO: 实现本地存储
+		return nil, fmt.Errorf("local storage not implemented yet")
 	case "oss":
 		if cfg.OSS == nil {
 			return nil, fmt.Errorf("OSS storage config is required")
