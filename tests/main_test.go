@@ -20,15 +20,23 @@ import (
 	"testing"
 
 	. "github.com/smartystreets/goconvey/convey"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"lemon/internal/config"
+	"lemon/internal/pkg/ark"
+	"lemon/internal/pkg/noveltools"
+	"lemon/internal/pkg/noveltools/providers"
 	"lemon/internal/pkg/storage"
 	"lemon/internal/pkg/storagefactory"
+	narrationRepo "lemon/internal/repository/narration"
 	novelrepo "lemon/internal/repository/novel"
 	resourceRepo "lemon/internal/repository/resource"
 	"lemon/internal/service"
+
+	"lemon/internal/model/novel"
+	"lemon/internal/pkg/id"
 )
 
 // 包级别的测试环境变量（在 TestMain 中初始化）
@@ -79,10 +87,38 @@ func TestMain(m *testing.M) {
 		panic(fmt.Sprintf("Failed to create storage: %v", err2))
 	}
 
-	// 3. 初始化测试服务
-	testServices = setupTestServices(testDB, testStorage)
+	// 3. 初始化 LLM Provider（从环境变量读取配置）
+	var llmProvider noveltools.LLMProvider
+	apiKey := os.Getenv("ARK_API_KEY")
+	if apiKey != "" {
+		aiCfg := &config.AIConfig{
+			Provider: "ark",
+			APIKey:   apiKey,
+			Model:    os.Getenv("ARK_MODEL"),
+			BaseURL:  os.Getenv("ARK_BASE_URL"),
+		}
+		if aiCfg.Model == "" {
+			aiCfg.Model = "doubao-seed-1-6-flash-250615"
+		}
+		if aiCfg.BaseURL == "" {
+			aiCfg.BaseURL = "https://ark.cn-beijing.volces.com/api/v3"
+		}
 
-	// 4. 设置清理函数
+		arkClient, err := ark.NewClient(aiCfg)
+		if err == nil {
+			llmProvider = providers.NewArkProvider(arkClient)
+			fmt.Fprintf(os.Stderr, "已初始化真实的 LLM Provider (Ark)\n")
+		} else {
+			fmt.Fprintf(os.Stderr, "警告: 初始化 LLM Provider 失败: %v，将使用 nil\n", err)
+		}
+	} else {
+		fmt.Fprintf(os.Stderr, "警告: ARK_API_KEY 未设置，LLM Provider 为 nil（某些测试可能需要）\n")
+	}
+
+	// 4. 初始化测试服务
+	testServices = setupTestServices(testDB, testStorage, llmProvider)
+
+	// 5. 设置清理函数
 	keepTestData := os.Getenv("KEEP_TEST_DATA") == "true"
 	testCleanup = func() {
 		if !keepTestData {
@@ -91,6 +127,7 @@ func TestMain(m *testing.M) {
 			_ = testDB.Collection("upload_sessions").Drop(testCtx)
 			_ = testDB.Collection("novels").Drop(testCtx)
 			_ = testDB.Collection("chapters").Drop(testCtx)
+			_ = testDB.Collection("narrations").Drop(testCtx)
 			// 清理存储文件
 			_ = os.RemoveAll(testStorageDir)
 		} else {
@@ -282,6 +319,68 @@ func uploadTestFile(ctx context.Context, t *testing.T, resourceService *service.
 	return completeResult.ResourceID
 }
 
+// findOrCreateTestChapters 查找或创建测试章节
+// 优先查找数据库中已有的章节，如果没有找到则创建新的章节
+func findOrCreateTestChapters(ctx context.Context, t *testing.T, services *TestServices, userID string) (string, []*novel.Chapter) {
+	// 1. 先尝试查找已有的章节（直接通过 userID 查找章节）
+	// 直接查询章节集合，查找该用户的最新章节
+	var chapterModel novel.Chapter
+	coll := testDB.Collection(chapterModel.Collection())
+
+	filter := bson.M{"user_id": userID, "deleted_at": nil}
+	opts := options.Find().SetSort(bson.M{"created_at": -1}).SetLimit(1)
+	cursor, err := coll.Find(ctx, filter, opts)
+	if err == nil {
+		var foundChapters []*novel.Chapter
+		if err := cursor.All(ctx, &foundChapters); err == nil && len(foundChapters) > 0 {
+			// 找到了章节，获取该章节所属的小说ID
+			firstChapter := foundChapters[0]
+			novelID := firstChapter.NovelID
+
+			// 获取该小说的所有章节
+			chapters, err := services.ChapterRepo.FindByNovelID(ctx, novelID)
+			if err == nil && len(chapters) > 0 {
+				// 验证章节是否有内容
+				hasContent := false
+				for _, ch := range chapters {
+					if ch.ChapterText != "" {
+						hasContent = true
+						break
+					}
+				}
+				if hasContent {
+					t.Logf("使用数据库中已有的章节: 小说ID=%s, 章节数=%d", novelID, len(chapters))
+					return novelID, chapters
+				}
+			}
+		}
+		cursor.Close(ctx)
+	}
+
+	// 2. 如果没有找到，则创建新的章节
+	t.Logf("未找到可用的章节，开始创建新章节...")
+	workflowID := id.New()
+	resourceID := findOrUploadTestFile(ctx, t, services, userID)
+
+	novelID, err := services.NovelService.CreateNovelFromResource(ctx, resourceID, userID, workflowID)
+	if err != nil {
+		t.Fatalf("创建小说失败: %v", err)
+	}
+
+	targetChapters := 5
+	err = services.NovelService.SplitNovelIntoChapters(ctx, novelID, targetChapters)
+	if err != nil {
+		t.Fatalf("切分章节失败: %v", err)
+	}
+
+	chapters, err := services.ChapterRepo.FindByNovelID(ctx, novelID)
+	if err != nil {
+		t.Fatalf("查询章节失败: %v", err)
+	}
+
+	return novelID, chapters
+}
+
 // findOrUploadTestFile 查找或上传测试文件
 // 优先查找数据库中已有的资源，如果没有找到再上传
 func findOrUploadTestFile(ctx context.Context, t *testing.T, services *TestServices, userID string) string {
@@ -306,9 +405,10 @@ func findOrUploadTestFile(ctx context.Context, t *testing.T, services *TestServi
 // 包含所有测试中需要的仓库和服务
 type TestServices struct {
 	// 仓库
-	ResourceRepo *resourceRepo.ResourceRepo
-	NovelRepo    novelrepo.NovelRepository
-	ChapterRepo  novelrepo.ChapterRepository
+	ResourceRepo  *resourceRepo.ResourceRepo
+	NovelRepo     novelrepo.NovelRepository
+	ChapterRepo   novelrepo.ChapterRepository
+	NarrationRepo narrationRepo.NarrationRepository
 
 	// 服务
 	ResourceService *service.ResourceService
@@ -316,23 +416,29 @@ type TestServices struct {
 
 	// 存储
 	Storage storage.Storage
+
+	// LLM Provider（用于生成解说文案）
+	LLMProvider noveltools.LLMProvider
 }
 
 // setupTestServices 初始化测试服务（仓库和服务）
-func setupTestServices(db *mongo.Database, testStorage storage.Storage) *TestServices {
+func setupTestServices(db *mongo.Database, testStorage storage.Storage, llmProvider noveltools.LLMProvider) *TestServices {
 	resourceRepo := resourceRepo.NewResourceRepo(db)
 	novelRepo := novelrepo.NewNovelRepo(db)
 	chapterRepo := novelrepo.NewChapterRepo(db)
+	narrationRepo := narrationRepo.NewNarrationRepo(db)
 
 	resourceService := service.NewResourceService(resourceRepo, testStorage)
-	novelService := service.NewNovelService(resourceRepo, novelRepo, chapterRepo, testStorage, nil)
+	novelService := service.NewNovelService(resourceRepo, novelRepo, chapterRepo, narrationRepo, testStorage, llmProvider)
 
 	return &TestServices{
 		ResourceRepo:    resourceRepo,
 		NovelRepo:       novelRepo,
 		ChapterRepo:     chapterRepo,
+		NarrationRepo:   narrationRepo,
 		ResourceService: resourceService,
 		NovelService:    novelService,
 		Storage:         testStorage,
+		LLMProvider:     llmProvider,
 	}
 }

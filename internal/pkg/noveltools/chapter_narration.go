@@ -76,24 +76,58 @@ func (ng *NarrationGenerator) Generate(
 }
 
 // buildChapterNarrationPrompt 构造章节解说的提示词
-//
-// 这里先用简单模板实现，后续可以改为基于文件的模板（类似 Python 版本的 Jinja2）。
+// 要求生成 JSON 格式的结构化数据，而不是 XML
 func buildChapterNarrationPrompt(chapterContent string, chapterNum, totalChapters int) string {
 	var b strings.Builder
 	b.WriteString("你是一名专业的中文小说解说文案撰写助手。\n")
-	b.WriteString("请基于下面给出的章节内容，生成适合短视频解说的中文文案。\n")
+	b.WriteString("请基于下面给出的章节内容，生成适合短视频解说的结构化解说文案。\n\n")
+
 	b.WriteString("要求：\n")
-	b.WriteString("1. 使用第三人称口播风格，语言自然、口语化。\n")
-	b.WriteString("2. 保持情节完整，控制在 200~400 字左右。\n")
-	b.WriteString("3. 不要剧透后续章节，只围绕当前章节的内容。\n")
-	b.WriteString("4. 可以适当加入氛围渲染，但不要加入无关剧情。\n\n")
+	b.WriteString("1. 必须生成至少7个分镜，每个分镜包含解说内容和图片描述\n")
+	b.WriteString("2. 解说内容总字数必须达到1100-1300字（中文字符）\n")
+	b.WriteString("3. 使用第三人称口播风格，语言自然、口语化\n")
+	b.WriteString("4. 不要剧透后续章节，只围绕当前章节的内容\n")
+	b.WriteString("5. 必须严格按照 JSON 格式输出，不要添加任何解释文字\n\n")
 
 	fmt.Fprintf(&b, "当前进度：第 %d 章 / 共 %d 章。\n\n", chapterNum, totalChapters)
 	b.WriteString("下面是本章节的原始内容：\n")
 	b.WriteString("---- BEGIN CHAPTER ----\n")
 	b.WriteString(chapterContent)
 	b.WriteString("\n---- END CHAPTER ----\n\n")
-	b.WriteString("现在请根据以上内容，输出一段解说文案（只输出文案本身，不要解释）：\n")
+
+	b.WriteString("请严格按照以下 JSON 格式输出（只输出 JSON，不要任何其他文字）：\n")
+	b.WriteString(`{
+  "chapter_info": {
+    "chapter_number": `)
+	fmt.Fprintf(&b, "%d", chapterNum)
+	b.WriteString(`,
+    "format": "章节风格（如：双时代格式、单一时代格式）",
+    "paint_style": "绘画风格（如：写实风格）"
+  },
+  "characters": [
+    {
+      "name": "角色姓名",
+      "gender": "男/女",
+      "age_group": "青年/中年/老年/青少年/儿童",
+      "role_number": "角色编号"
+    }
+  ],
+  "scenes": [
+    {
+      "scene_number": "1",
+      "narration": "分镜级别的解说内容（可选）",
+      "shots": [
+        {
+          "closeup_number": "1",
+          "character": "特写人物姓名",
+          "narration": "特写解说内容（30-32字）",
+          "scene_prompt": "图片prompt描述"
+        }
+      ]
+    }
+  ]
+}`)
+	b.WriteString("\n\n注意：必须确保解说内容总字数在1100-1300字之间，且至少有7个分镜。\n")
 
 	return b.String()
 }

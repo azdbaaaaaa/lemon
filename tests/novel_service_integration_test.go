@@ -18,6 +18,7 @@ import (
 	. "github.com/smartystreets/goconvey/convey"
 
 	"lemon/internal/pkg/id"
+	narrationRepo "lemon/internal/repository/narration"
 	novelrepo "lemon/internal/repository/novel"
 	resourceRepo "lemon/internal/repository/resource"
 	"lemon/internal/service"
@@ -32,10 +33,11 @@ func TestNovelService_Integration(t *testing.T) {
 		resourceRepo := resourceRepo.NewResourceRepo(db)
 		novelRepo := novelrepo.NewNovelRepo(db)
 		chapterRepo := novelrepo.NewChapterRepo(db)
+		narrationRepo := narrationRepo.NewNarrationRepo(db)
 
 		// 初始化服务
 		resourceService := service.NewResourceService(resourceRepo, testStorage)
-		novelService := service.NewNovelService(resourceRepo, novelRepo, chapterRepo, testStorage, nil)
+		novelService := service.NewNovelService(resourceRepo, novelRepo, chapterRepo, narrationRepo, testStorage, nil)
 
 		// 读取测试文件
 		novelFilePath := getTestNovelFilePath(t)

@@ -7,6 +7,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
+	"lemon/internal/model/narration"
 	"lemon/internal/model/novel"
 	"lemon/internal/model/resource"
 )
@@ -24,6 +25,7 @@ func EnsureIndexes(db *mongo.Database) error {
 		&resource.UploadSession{},
 		&novel.Novel{},
 		&novel.Chapter{},
+		&narration.Narration{},
 	}
 
 	// 为实现了 Model 接口的模型创建索引

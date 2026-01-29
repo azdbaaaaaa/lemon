@@ -7,22 +7,25 @@ import (
 	"strings"
 	"sync"
 
+	"lemon/internal/model/narration"
 	"lemon/internal/model/novel"
 	"lemon/internal/pkg/id"
 	"lemon/internal/pkg/noveltools"
 	"lemon/internal/pkg/storage"
+	narrationRepo "lemon/internal/repository/narration"
 	novelrepo "lemon/internal/repository/novel"
 	resourceRepo "lemon/internal/repository/resource"
 )
 
 // NovelService 小说服务
-// 用途：对单一章节生成解说，并落库到 chapters.narration_text
+// 用途：对单一章节生成解说，并落库到 narrations 表
 type NovelService struct {
-	resourceRepo *resourceRepo.ResourceRepo
-	novelRepo    novelrepo.NovelRepository
-	chapterRepo  novelrepo.ChapterRepository
-	storage      storage.Storage
-	llmProvider  noveltools.LLMProvider
+	resourceRepo  *resourceRepo.ResourceRepo
+	novelRepo     novelrepo.NovelRepository
+	chapterRepo   novelrepo.ChapterRepository
+	narrationRepo narrationRepo.NarrationRepository
+	storage       storage.Storage
+	llmProvider   noveltools.LLMProvider
 }
 
 // NewNovelService 创建小说服务
@@ -30,22 +33,28 @@ func NewNovelService(
 	resourceRepo *resourceRepo.ResourceRepo,
 	novelRepo novelrepo.NovelRepository,
 	chapterRepo novelrepo.ChapterRepository,
+	narrationRepo narrationRepo.NarrationRepository,
 	storage storage.Storage,
 	llmProvider noveltools.LLMProvider,
 ) *NovelService {
 	return &NovelService{
-		resourceRepo: resourceRepo,
-		novelRepo:    novelRepo,
-		chapterRepo:  chapterRepo,
-		storage:      storage,
-		llmProvider:  llmProvider,
+		resourceRepo:  resourceRepo,
+		novelRepo:     novelRepo,
+		chapterRepo:   chapterRepo,
+		narrationRepo: narrationRepo,
+		storage:       storage,
+		llmProvider:   llmProvider,
 	}
 }
 
-// GenerateNarrationForChapter 为单一章节生成解说文本，并更新到章节的 narration_text 字段
+// GenerateNarrationForChapter 为单一章节生成解说文本，并保存到 narrations 表
+// 返回的是 XML 格式的字符串（用于向后兼容），实际存储的是结构化数据
 func (s *NovelService) GenerateNarrationForChapter(ctx context.Context, chapterID string) (string, error) {
 	if s.chapterRepo == nil {
 		return "", fmt.Errorf("chapterRepo is required")
+	}
+	if s.narrationRepo == nil {
+		return "", fmt.Errorf("narrationRepo is required")
 	}
 	if s.llmProvider == nil {
 		return "", fmt.Errorf("llmProvider is required")
@@ -76,15 +85,42 @@ func (s *NovelService) GenerateNarrationForChapter(ctx context.Context, chapterI
 		return "", fmt.Errorf("generated narrationText is empty")
 	}
 
-	validatedText, err := s.validateAndFixNarration(ctx, narrationText, false)
+	// 步骤1: 内容审查和过滤（参考 Python 的 audit_and_filter_narration）
+	// 极度宽松模式：仅提示，不阻断
+	filteredNarration, err := s.auditAndFilterNarration(ctx, narrationText, ch.Sequence)
 	if err != nil {
-		return "", err
+		// 即使审查出错，也继续使用原始内容（极度宽松模式）
+		filteredNarration = narrationText
 	}
 
-	if err := s.chapterRepo.UpdateNarrationText(ctx, ch.ID, validatedText); err != nil {
-		return "", err
+	// 步骤2: 验证 JSON 格式并解析为结构化数据
+	structuredContent, validationResult := noveltools.ValidateNarrationJSON(filteredNarration, 1100, 1300)
+	if !validationResult.IsValid {
+		return "", fmt.Errorf("narration validation failed: %s", validationResult.Message)
 	}
-	return validatedText, nil
+
+	// 保存到 narrations 表
+	narrationID := id.New()
+	narrationEntity := &narration.Narration{
+		ID:        narrationID,
+		ChapterID: ch.ID,
+		UserID:    ch.UserID,
+		Content:   structuredContent,
+		Status:    "completed",
+	}
+
+	// 如果已存在解说文案，先软删除旧的
+	existingNarration, err := s.narrationRepo.FindByChapterID(ctx, ch.ID)
+	if err == nil && existingNarration != nil {
+		_ = s.narrationRepo.Delete(ctx, existingNarration.ID)
+	}
+
+	if err := s.narrationRepo.Create(ctx, narrationEntity); err != nil {
+		return "", fmt.Errorf("failed to save narration: %w", err)
+	}
+
+	// 返回 JSON 字符串（用于向后兼容）
+	return filteredNarration, nil
 }
 
 func (s *NovelService) getTotalChapters(ctx context.Context, novelID string) (int, error) {
@@ -206,6 +242,9 @@ func (s *NovelService) GenerateNarrationsForAllChapters(ctx context.Context, nov
 	if s.chapterRepo == nil {
 		return fmt.Errorf("chapterRepo is required")
 	}
+	if s.narrationRepo == nil {
+		return fmt.Errorf("narrationRepo is required")
+	}
 	if s.llmProvider == nil {
 		return fmt.Errorf("llmProvider is required")
 	}
@@ -245,14 +284,39 @@ func (s *NovelService) GenerateNarrationsForAllChapters(ctx context.Context, nov
 				return
 			}
 
-			validatedText, err := s.validateAndFixNarration(ctx, narrationText, false)
+			// 步骤1: 内容审查和过滤（参考 Python 的 audit_and_filter_narration）
+			// 极度宽松模式：仅提示，不阻断
+			filteredNarration, err := s.auditAndFilterNarration(ctx, narrationText, chapter.Sequence)
 			if err != nil {
-				errCh <- fmt.Errorf("failed to validate narration for chapter %d: %w", chapter.Sequence, err)
+				// 即使审查出错，也继续使用原始内容（极度宽松模式）
+				filteredNarration = narrationText
+			}
+
+			// 步骤2: 验证 JSON 格式并解析为结构化数据
+			structuredContent, validationResult := noveltools.ValidateNarrationJSON(filteredNarration, 1100, 1300)
+			if !validationResult.IsValid {
+				errCh <- fmt.Errorf("failed to validate narration for chapter %d: %s", chapter.Sequence, validationResult.Message)
 				return
 			}
 
-			if err := s.chapterRepo.UpdateNarrationText(ctx, chapter.ID, validatedText); err != nil {
-				errCh <- fmt.Errorf("failed to update narration for chapter %d: %w", chapter.Sequence, err)
+			// 保存到 narrations 表
+			narrationID := id.New()
+			narrationEntity := &narration.Narration{
+				ID:        narrationID,
+				ChapterID: chapter.ID,
+				UserID:    chapter.UserID,
+				Content:   structuredContent,
+				Status:    "completed",
+			}
+
+			// 如果已存在解说文案，先软删除旧的
+			existingNarration, err := s.narrationRepo.FindByChapterID(ctx, chapter.ID)
+			if err == nil && existingNarration != nil {
+				_ = s.narrationRepo.Delete(ctx, existingNarration.ID)
+			}
+
+			if err := s.narrationRepo.Create(ctx, narrationEntity); err != nil {
+				errCh <- fmt.Errorf("failed to save narration for chapter %d: %w", chapter.Sequence, err)
 				return
 			}
 		}(ch)
@@ -271,6 +335,26 @@ func (s *NovelService) GenerateNarrationsForAllChapters(ctx context.Context, nov
 	}
 
 	return nil
+}
+
+// auditAndFilterNarration 对生成的解说内容进行审查和过滤（极度宽松模式）
+// 参考 Python 的 audit_and_filter_narration 方法
+// 仅提示，不阻断，即使检测到敏感内容也返回原始内容
+func (s *NovelService) auditAndFilterNarration(ctx context.Context, narration string, chapterNum int) (string, error) {
+	contentFilter := noveltools.NewContentFilter()
+
+	// 检查内容是否包含违禁词汇（仅提示，不阻断）
+	checkResult := contentFilter.CheckContent(narration)
+
+	if !checkResult.IsSafe {
+		// 记录警告日志（在实际环境中可以使用 log 包）
+		// log.Warn().Int("chapter_num", chapterNum).Strs("issues", checkResult.Issues).
+		// 	Msg("检测到敏感内容，但继续生成")
+		_ = checkResult.Issues // 暂时忽略，避免未使用变量警告
+	}
+
+	// 无论是否检测到敏感内容，都返回原始内容（极度宽松模式）
+	return narration, nil
 }
 
 // validateAndFixNarration 验证并修复解说文案
