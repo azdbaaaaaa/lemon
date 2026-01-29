@@ -119,8 +119,8 @@ wire_gen.go
 *.kubeconfig
 
 # Local development
-.local/
-local/
+# .local/
+# local/
 
 # Backup files
 *.bak
