@@ -18,19 +18,15 @@ import (
 
 	. "github.com/smartystreets/goconvey/convey"
 
-	resourceRepo "lemon/internal/repository/resource"
 	"lemon/internal/service"
 )
 
 // TestResourceService_UploadTXT 测试上传 TXT 文件的完整流程
 func TestResourceService_UploadTXT(t *testing.T) {
 	Convey("ResourceService 上传 TXT 文件测试", t, func() {
-		ctx, db, testStorage, cleanup := setupTestEnvironment(t)
-		defer cleanup()
-
-		// 初始化仓库和服务
-		resourceRepo := resourceRepo.NewResourceRepo(db)
-		resourceService := service.NewResourceService(resourceRepo, testStorage)
+		// 使用 TestMain 中初始化的全局变量
+		ctx := testCtx
+		services := testServices
 
 		// 读取测试文件
 		novelFilePath := getTestNovelFilePath(t)
@@ -55,7 +51,7 @@ func TestResourceService_UploadTXT(t *testing.T) {
 				Ext:         "txt",
 			}
 
-			prepareResult, err := resourceService.PrepareUpload(ctx, prepareReq)
+			prepareResult, err := services.ResourceService.PrepareUpload(ctx, prepareReq)
 			So(err, ShouldBeNil)
 			So(prepareResult, ShouldNotBeNil)
 			sessionID := prepareResult.SessionID
@@ -66,12 +62,12 @@ func TestResourceService_UploadTXT(t *testing.T) {
 			So(err, ShouldBeNil)
 
 			// 上传文件
-			uploadURL, err := testStorage.Upload(ctx, uploadKey, novelFile, "text/plain")
+			uploadURL, err := services.Storage.Upload(ctx, uploadKey, novelFile, "text/plain")
 			So(err, ShouldBeNil)
 			So(uploadURL, ShouldNotBeEmpty)
 
 			// 验证文件已上传
-			exists, err := testStorage.Exists(ctx, uploadKey)
+			exists, err := services.Storage.Exists(ctx, uploadKey)
 			So(err, ShouldBeNil)
 			So(exists, ShouldBeTrue)
 
@@ -81,7 +77,7 @@ func TestResourceService_UploadTXT(t *testing.T) {
 					// MD5 和 SHA256 可选，这里不提供
 				}
 
-				completeResult, err := resourceService.CompleteUpload(ctx, completeReq)
+				completeResult, err := services.ResourceService.CompleteUpload(ctx, completeReq)
 				So(err, ShouldBeNil)
 				So(completeResult, ShouldNotBeNil)
 				So(completeResult.ResourceID, ShouldNotBeEmpty)
@@ -89,7 +85,7 @@ func TestResourceService_UploadTXT(t *testing.T) {
 
 				Convey("步骤3: 验证资源记录", func() {
 					// 查询资源详情
-					resourceEntity, err := resourceRepo.FindByID(ctx, completeResult.ResourceID)
+					resourceEntity, err := services.ResourceRepo.FindByID(ctx, completeResult.ResourceID)
 					So(err, ShouldBeNil)
 					So(resourceEntity, ShouldNotBeNil)
 					So(resourceEntity.UserID, ShouldEqual, userID)
@@ -107,13 +103,13 @@ func TestResourceService_UploadTXT(t *testing.T) {
 							ResourceID: completeResult.ResourceID,
 							ExpiresIn:  time.Hour,
 						}
-						downloadResult, err := resourceService.GetDownloadURL(ctx, userID, downloadReq)
+						downloadResult, err := services.ResourceService.GetDownloadURL(ctx, userID, downloadReq)
 						So(err, ShouldBeNil)
 						So(downloadResult, ShouldNotBeNil)
 						So(downloadResult.DownloadURL, ShouldNotBeEmpty)
 
 						// 下载文件并验证内容
-						reader, err := testStorage.Download(ctx, uploadKey)
+						reader, err := services.Storage.Download(ctx, uploadKey)
 						So(err, ShouldBeNil)
 						defer reader.Close()
 
