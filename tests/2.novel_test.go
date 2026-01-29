@@ -29,8 +29,8 @@ func TestNovelService_CreateAndSplit(t *testing.T) {
 		userID := "test_user_novel_001"
 		workflowID := id.New()
 
-		// 步骤1: 使用第一步上传的结果（直接调用辅助函数）
-		resourceID := uploadTestFile(ctx, t, services.ResourceService, services.Storage, userID)
+		// 步骤1: 查找或上传测试文件（优先使用数据库中已有的资源）
+		resourceID := findOrUploadTestFile(ctx, t, services, userID)
 
 		Convey("步骤2: 根据资源创建小说", func() {
 			novelID, err := services.NovelService.CreateNovelFromResource(ctx, resourceID, userID, workflowID)

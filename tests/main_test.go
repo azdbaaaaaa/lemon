@@ -282,6 +282,26 @@ func uploadTestFile(ctx context.Context, t *testing.T, resourceService *service.
 	return completeResult.ResourceID
 }
 
+// findOrUploadTestFile 查找或上传测试文件
+// 优先查找数据库中已有的资源，如果没有找到再上传
+func findOrUploadTestFile(ctx context.Context, t *testing.T, services *TestServices, userID string) string {
+	// 1. 先尝试查找数据库中已有的资源（按创建时间降序，取最新的）
+	resources, _, err := services.ResourceRepo.FindByUserID(ctx, userID, 1, 0)
+	if err == nil && len(resources) > 0 {
+		// 找到了已有的资源，直接使用
+		resource := resources[0]
+		// 验证资源状态是 ready
+		if resource.Status == "ready" {
+			t.Logf("使用数据库中已有的资源: %s (文件名: %s)", resource.ID, resource.Name)
+			return resource.ID
+		}
+	}
+
+	// 2. 如果没有找到或资源状态不对，则上传新文件
+	t.Logf("未找到可用的资源，开始上传新文件...")
+	return uploadTestFile(ctx, t, services.ResourceService, services.Storage, userID)
+}
+
 // TestServices 测试服务集合
 // 包含所有测试中需要的仓库和服务
 type TestServices struct {
