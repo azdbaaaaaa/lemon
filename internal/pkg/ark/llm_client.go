@@ -14,11 +14,11 @@ import (
 	"lemon/internal/config"
 )
 
-// Client Ark 客户端封装
+// LLMClient Ark LLM 客户端封装
 // 用于调用火山引擎的 Ark API（豆包大模型）
 // 使用官方 volcengine-go-sdk
 // 参考: https://github.com/volcengine/volcengine-go-sdk
-type Client struct {
+type LLMClient struct {
 	client *arkruntime.Client
 	model  string
 	mu     sync.Mutex // 用于并发安全
@@ -49,8 +49,8 @@ func ArkConfigFromEnv() *config.AIConfig {
 	}
 }
 
-// NewClient 创建 Ark 客户端（使用官方 SDK）
-func NewClient(cfg *config.AIConfig) (*Client, error) {
+// NewLLMClient 创建 Ark LLM 客户端（使用官方 SDK）
+func NewLLMClient(cfg *config.AIConfig) (*LLMClient, error) {
 	if cfg.APIKey == "" {
 		return nil, fmt.Errorf("Ark API key is required")
 	}
@@ -75,7 +75,7 @@ func NewClient(cfg *config.AIConfig) (*Client, error) {
 	// 使用 API Key 创建客户端
 	arkClient := arkruntime.NewClientWithApiKey(cfg.APIKey, opts...)
 
-	return &Client{
+	return &LLMClient{
 		client: arkClient,
 		model:  model,
 	}, nil
@@ -119,7 +119,7 @@ type Usage struct {
 
 // CreateChatCompletion 创建聊天完成（对应 Python 的 client.chat.completions.create）
 // 这是主要的 API 调用方法，用于生成文本
-func (c *Client) CreateChatCompletion(ctx context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
+func (c *LLMClient) CreateChatCompletion(ctx context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -159,7 +159,7 @@ func (c *Client) CreateChatCompletion(ctx context.Context, req *ChatCompletionRe
 
 // CreateChatCompletionSimple 简化版本的聊天完成（只需要 prompt）
 // 方便快速调用
-func (c *Client) CreateChatCompletionSimple(ctx context.Context, prompt string) (string, error) {
+func (c *LLMClient) CreateChatCompletionSimple(ctx context.Context, prompt string) (string, error) {
 	maxTokens := 32 * 1024
 	temperature := 0.7
 

@@ -27,6 +27,8 @@ func EnsureIndexes(db *mongo.Database) error {
 		&novel.Narration{},
 		&novel.Audio{},
 		&novel.Subtitle{},
+		&novel.Character{},
+		&novel.SceneShotImage{},
 	}
 
 	// 为实现了 Model 接口的模型创建索引

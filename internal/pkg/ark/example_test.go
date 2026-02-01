@@ -26,7 +26,7 @@ func ExampleNewClient() {
 	}
 
 	// 创建客户端
-	client, err := ark.NewClient(cfg)
+	client, err := ark.NewLLMClient(cfg)
 	if err != nil {
 		fmt.Printf("创建客户端失败: %v\n", err)
 		return
@@ -57,7 +57,7 @@ func ExampleClient_CreateChatCompletion() {
 		Model:  "doubao-seed-1-6-flash-250615",
 	}
 
-	client, err := ark.NewClient(cfg)
+	client, err := ark.NewLLMClient(cfg)
 	if err != nil {
 		fmt.Printf("创建客户端失败: %v\n", err)
 		return
@@ -112,7 +112,7 @@ func ExampleClient_CreateChatCompletion_withSystemMessage() {
 		Model:  "doubao-seed-1-6-flash-250615",
 	}
 
-	client, err := ark.NewClient(cfg)
+	client, err := ark.NewLLMClient(cfg)
 	if err != nil {
 		fmt.Printf("创建客户端失败: %v\n", err)
 		return

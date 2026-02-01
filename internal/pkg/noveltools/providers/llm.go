@@ -6,6 +6,8 @@ import (
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
+
+	"lemon/internal/pkg/ark"
 )
 
 // EinoProvider Eino 封装的 LLM 提供者（默认使用）
@@ -55,3 +57,30 @@ func (p *EinoProvider) Generate(ctx context.Context, prompt string) (string, err
 	return content, nil
 }
 
+// ArkProvider Ark 实现的 LLM 提供者（使用 pkg/ark 的 LLMClient）
+// 实现了 noveltools.LLMProvider 接口
+type ArkProvider struct {
+	client *ark.LLMClient
+}
+
+// NewArkProvider 创建基于 Ark 的 LLM 提供者（使用 pkg/ark 的 LLMClient）
+//
+// Args:
+//   - client: Ark LLM 客户端实例（通过 ark.NewLLMClient 创建）
+//
+// Returns:
+//   - *ArkProvider: LLM 提供者实例
+func NewArkProvider(client *ark.LLMClient) *ArkProvider {
+	return &ArkProvider{
+		client: client,
+	}
+}
+
+// Generate 根据提示词生成文本（使用 Ark LLM 客户端）
+// 实现了 noveltools.LLMProvider 接口
+func (p *ArkProvider) Generate(ctx context.Context, prompt string) (string, error) {
+	if p.client == nil {
+		return "", fmt.Errorf("ark client is required")
+	}
+	return p.client.CreateChatCompletionSimple(ctx, prompt)
+}

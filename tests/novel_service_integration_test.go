@@ -18,8 +18,6 @@ import (
 	. "github.com/smartystreets/goconvey/convey"
 
 	"lemon/internal/pkg/id"
-	novelrepo "lemon/internal/repository/novel"
-	resourceRepo "lemon/internal/repository/resource"
 	"lemon/internal/service"
 	novelservice "lemon/internal/service/novel"
 )
@@ -29,27 +27,15 @@ func TestNovelService_Integration(t *testing.T) {
 		ctx, db, testStorage, cleanup := setupTestEnvironment(t)
 		defer cleanup()
 
-		// 初始化仓库
-		resourceRepo := resourceRepo.NewResourceRepo(db)
-		novelRepo := novelrepo.NewNovelRepo(db)
-		chapterRepo := novelrepo.NewChapterRepo(db)
-		narrationRepo := novelrepo.NewNarrationRepo(db)
-		audioRepo := novelrepo.NewAudioRepo(db)
-		subtitleRepo := novelrepo.NewSubtitleRepo(db)
+		// 初始化 ResourceService（内部自动创建 repository）
+		resourceService := service.NewResourceService(db, testStorage)
 
-		// 初始化服务
-		resourceService := service.NewResourceService(resourceRepo, testStorage)
-		novelService := novelservice.NewNovelService(
+		// 初始化 NovelService（统一处理所有 repository 和 providers）
+		novelService, err := novelservice.NewNovelService(
+			db,
 			resourceService,
-			novelRepo,
-			chapterRepo,
-			narrationRepo,
-			audioRepo,
-			subtitleRepo,
-			testStorage,
-			nil, // llmProvider
-			nil, // ttsProvider
 		)
+		So(err, ShouldBeNil)
 
 		// 读取测试文件
 		novelFilePath := getTestNovelFilePath(t)

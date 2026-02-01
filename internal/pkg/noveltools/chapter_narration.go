@@ -6,21 +6,6 @@ import (
 	"strings"
 )
 
-// LLMProvider 定义了调用大模型的接口
-// 具体的「如何调用大模型」由调用方通过实现此接口注入，方便单测和替换实现
-type LLMProvider interface {
-	// Generate 根据提示词生成文本
-	//
-	// Args:
-	//   - ctx: 上下文
-	//   - prompt: 提示词
-	//
-	// Returns:
-	//   - text: 生成的文本
-	//   - err: 错误信息
-	Generate(ctx context.Context, prompt string) (string, error)
-}
-
 // NarrationGenerator 解说文案生成器，用于为章节生成解说文案
 //
 // 设计原则：

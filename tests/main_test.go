@@ -27,13 +27,8 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"lemon/internal/config"
-	"lemon/internal/pkg/ark"
-	"lemon/internal/pkg/noveltools"
-	"lemon/internal/pkg/noveltools/providers"
 	"lemon/internal/pkg/storage"
 	"lemon/internal/pkg/storagefactory"
-	novelrepo "lemon/internal/repository/novel"
-	resourceRepo "lemon/internal/repository/resource"
 	"lemon/internal/service"
 	novelservice "lemon/internal/service/novel"
 
@@ -89,28 +84,8 @@ func TestMain(m *testing.M) {
 		panic(fmt.Sprintf("Failed to create storage: %v", err2))
 	}
 
-	// 3. 初始化 LLM Provider（从环境变量读取配置）
-	var llmProvider noveltools.LLMProvider
-	aiCfg := ark.ArkConfigFromEnv()
-	arkClient, err := ark.NewClient(aiCfg)
-	if err != nil {
-		panic(fmt.Sprintf("初始化 LLM Provider 失败: %v", err))
-	}
-	llmProvider = providers.NewArkProvider(arkClient)
-	fmt.Fprintf(os.Stderr, "[TestMain] ✓ 已初始化真实的 LLM Provider (Ark)\n")
-
-	// 4. 初始化 TTS Provider（从环境变量读取配置）
-	var ttsProvider noveltools.TTSProvider
-	ttsConfig := ark.TTSConfigFromEnv()
-	ttsClient, err := ark.NewTTSClient(ttsConfig)
-	if err != nil {
-		panic(fmt.Sprintf("初始化 TTS Provider 失败: %v", err))
-	}
-	ttsProvider = providers.NewByteDanceTTSProvider(ttsClient)
-	fmt.Fprintf(os.Stderr, "[TestMain] ✓ 已初始化真实的 TTS Provider\n")
-
-	// 5. 初始化测试服务
-	testServices = setupTestServices(testDB, testStorage, llmProvider, ttsProvider)
+	// 3. 初始化测试服务（providers 现在由 NovelService 内部管理）
+	testServices = setupTestServices(testDB, testStorage)
 
 	// 6. 设置清理函数
 	keepTestDataEnv := os.Getenv("KEEP_TEST_DATA")
@@ -121,13 +96,15 @@ func TestMain(m *testing.M) {
 			// 清理数据库集合（按顺序删除，避免依赖问题）
 			// 注意：删除集合不会删除数据库本身，但如果所有集合都被删除，MongoDB 可能会在下次访问时自动删除空数据库
 			collections := []string{
-				"subtitles",       // 先删除依赖的集合
-				"audios",          // 再删除依赖的集合
-				"narrations",      // 然后删除解说文案
-				"chapters",        // 删除章节
-				"novels",          // 删除小说
-				"upload_sessions", // 删除上传会话
-				"resources",       // 最后删除资源
+				"scene_shot_images", // 先删除图片
+				"subtitles",         // 删除字幕
+				"audios",            // 删除音频
+				"characters",        // 删除角色
+				"narrations",        // 删除解说文案
+				"chapters",          // 删除章节
+				"novels",            // 删除小说
+				"upload_sessions",   // 删除上传会话
+				"resources",         // 最后删除资源
 			}
 			for _, collName := range collections {
 				if err := testDB.Collection(collName).Drop(testCtx); err != nil {
@@ -447,14 +424,9 @@ func findOrUploadTestFile(ctx context.Context, t *testing.T, services *TestServi
 }
 
 // TestServices 测试服务集合
-// 包含所有测试中需要的仓库和服务
+// 包含所有测试中需要的服务
+// 注意：测试应该使用 Service 层，不应该直接使用 Repository 层
 type TestServices struct {
-	// 仓库
-	ResourceRepo  *resourceRepo.ResourceRepo
-	NovelRepo     novelrepo.NovelRepository
-	ChapterRepo   novelrepo.ChapterRepository
-	NarrationRepo novelrepo.NarrationRepository
-
 	// 服务
 	ResourceService service.ResourceService
 	NovelService    novelservice.NovelService
@@ -462,45 +434,28 @@ type TestServices struct {
 	// 存储
 	Storage storage.Storage
 
-	// LLM Provider（用于生成解说文案）
-	LLMProvider noveltools.LLMProvider
-
-	// TTS Provider（用于生成音频）
-	TTSProvider noveltools.TTSProvider
+	// 注意：Providers 现在由 NovelService 内部管理，不再需要单独传入
 }
 
-// setupTestServices 初始化测试服务（仓库和服务）
-func setupTestServices(db *mongo.Database, testStorage storage.Storage, llmProvider noveltools.LLMProvider, ttsProvider noveltools.TTSProvider) *TestServices {
-	resourceRepo := resourceRepo.NewResourceRepo(db)
-	novelRepo := novelrepo.NewNovelRepo(db)
-	chapterRepo := novelrepo.NewChapterRepo(db)
-	narrationRepo := novelrepo.NewNarrationRepo(db)
+// setupTestServices 初始化测试服务
+// Providers 现在由 NovelService 内部管理，不再需要单独传入
+// 测试应该使用 Service 层，不需要直接访问 Repository 层
+func setupTestServices(db *mongo.Database, testStorage storage.Storage) *TestServices {
+	// 初始化 ResourceService（内部自动创建 repository）
+	resourceService := service.NewResourceService(db, testStorage)
 
-	audioRepo := novelrepo.NewAudioRepo(db)
-	subtitleRepo := novelrepo.NewSubtitleRepo(db)
-
-	resourceService := service.NewResourceService(resourceRepo, testStorage)
-	novelService := novelservice.NewNovelService(
+	// 初始化 NovelService（内部自动创建所有 repository）
+	novelService, err := novelservice.NewNovelService(
+		db,
 		resourceService,
-		novelRepo,
-		chapterRepo,
-		narrationRepo,
-		audioRepo,
-		subtitleRepo,
-		testStorage,
-		llmProvider,
-		ttsProvider,
 	)
+	if err != nil {
+		panic(fmt.Sprintf("初始化 NovelService 失败: %v", err))
+	}
 
 	return &TestServices{
-		ResourceRepo:    resourceRepo,
-		NovelRepo:       novelRepo,
-		ChapterRepo:     chapterRepo,
-		NarrationRepo:   narrationRepo,
 		ResourceService: resourceService,
 		NovelService:    novelService,
 		Storage:         testStorage,
-		LLMProvider:     llmProvider,
-		TTSProvider:     ttsProvider,
 	}
 }

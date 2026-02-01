@@ -53,11 +53,12 @@ func ExampleUsage() {
 	//       Model:    "doubao-seed-1-6-flash-250615",
 	//   }
 	//   chatModel, _ := component.NewChatModel(ctx, cfg)
-	//   llmProvider := providers.NewEinoProvider(chatModel)  // 默认使用 EinoProvider
+	//   llmProvider := providers.NewEinoProvider(chatModel)  // 使用 EinoProvider
 	//   generator := NewNarrationGenerator(llmProvider)
 	//
-	// 或者使用传统的 ArkProvider（向后兼容）：
+	// 或者使用 ArkProvider：
 	//   import "lemon/internal/pkg/ark"
+	//   import "lemon/internal/pkg/noveltools/providers"
 	//   arkClient, _ := ark.NewClient(cfg)
 	//   llmProvider := providers.NewArkProvider(arkClient)
 
@@ -100,7 +101,7 @@ func ExampleUsage() {
 //
 // Args:
 //   - ctx: 上下文
-//   - llmProvider: LLM 提供者（推荐使用 providers.EinoProvider，或 providers.ArkProvider 用于向后兼容）
+//   - llmProvider: LLM 提供者（可使用 providers.EinoProvider 或 providers.ArkProvider）
 //   - chapterContent: 章节原始内容
 //   - chapterNum: 章节编号（从1开始）
 //   - totalChapters: 总章节数

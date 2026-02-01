@@ -1,4 +1,4 @@
-package ark
+package tts
 
 import (
 	"context"
@@ -16,11 +16,10 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"lemon/internal/pkg/id"
-	"lemon/internal/pkg/noveltools"
 )
 
-// TTSConfig TTS 配置
-type TTSConfig struct {
+// Config TTS 配置
+type Config struct {
 	APIURL      string // API 地址，默认: https://openspeech.bytedance.com/api/v1/tts
 	AccessToken string // 访问令牌（必需）
 	AppID       string // 应用ID（可选）
@@ -29,7 +28,7 @@ type TTSConfig struct {
 	SampleRate  int    // 采样率，默认: 44100
 }
 
-// TTSConfigFromEnv 从环境变量创建 TTSConfig
+// ConfigFromEnv 从环境变量创建 TTSConfig
 // 支持的环境变量：
 //   - TTS_ACCESS_TOKEN: 访问令牌（必需）
 //   - TTS_APP_ID: 应用ID（可选）
@@ -37,7 +36,7 @@ type TTSConfig struct {
 //   - TTS_CLUSTER: 集群名称（可选，默认: volcano_tts）
 //   - TTS_SAMPLE_RATE: 采样率（可选，默认: 44100）
 //   - TTS_API_URL: API 地址（可选，默认: https://openspeech.bytedance.com/api/v1/tts）
-func TTSConfigFromEnv() TTSConfig {
+func ConfigFromEnv() Config {
 	accessToken := os.Getenv("TTS_ACCESS_TOKEN")
 	appID := os.Getenv("TTS_APP_ID")
 	voiceType := os.Getenv("TTS_VOICE_TYPE")
@@ -62,7 +61,7 @@ func TTSConfigFromEnv() TTSConfig {
 		}
 	}
 
-	return TTSConfig{
+	return Config{
 		APIURL:      apiURL,
 		AccessToken: accessToken,
 		AppID:       appID,
@@ -72,10 +71,10 @@ func TTSConfigFromEnv() TTSConfig {
 	}
 }
 
-// TTSClient TTS 客户端封装
+// Client TTS 客户端封装
 // 用于调用火山引擎的 TTS API（文本转语音）
 // 参考: https://openspeech.bytedance.com/api/v1/tts
-type TTSClient struct {
+type Client struct {
 	apiURL      string
 	accessToken string
 	appID       string
@@ -85,8 +84,8 @@ type TTSClient struct {
 	httpClient  *http.Client
 }
 
-// NewTTSClient 创建 TTS 客户端
-func NewTTSClient(config TTSConfig) (*TTSClient, error) {
+// NewClient 创建 TTS 客户端
+func NewClient(config Config) (*Client, error) {
 	if config.AccessToken == "" {
 		return nil, fmt.Errorf("TTS access token is required")
 	}
@@ -111,7 +110,7 @@ func NewTTSClient(config TTSConfig) (*TTSClient, error) {
 		sampleRate = 44100
 	}
 
-	return &TTSClient{
+	return &Client{
 		apiURL:      apiURL,
 		accessToken: config.AccessToken,
 		appID:       config.AppID,
@@ -124,14 +123,38 @@ func NewTTSClient(config TTSConfig) (*TTSClient, error) {
 	}, nil
 }
 
+// Result TTS生成结果
+type Result struct {
+	Success       bool           `json:"success"`        // 是否成功
+	AudioPath     string         `json:"audio_path"`     // 音频文件路径
+	TimestampData *TimestampData `json:"timestamp_data"` // 时间戳数据
+	ErrorMessage  string         `json:"error_message"`  // 错误信息
+}
+
+// TimestampData 时间戳数据
+type TimestampData struct {
+	Text                string          `json:"text"`                 // 原始文本
+	AudioFile           string          `json:"audio_file"`           // 音频文件路径
+	Duration            float64         `json:"duration"`             // 音频时长（秒）
+	CharacterTimestamps []CharTimestamp `json:"character_timestamps"` // 字符级时间戳
+	GeneratedAt         time.Time       `json:"generated_at"`         // 生成时间
+}
+
+// CharTimestamp 字符时间戳
+type CharTimestamp struct {
+	Character string  `json:"character"`  // 字符
+	StartTime float64 `json:"start_time"` // 开始时间（秒）
+	EndTime   float64 `json:"end_time"`   // 结束时间（秒）
+}
+
 // GenerateVoiceWithTimestamps 生成语音并获取时间戳
-func (c *TTSClient) GenerateVoiceWithTimestamps(
+func (c *Client) GenerateVoiceWithTimestamps(
 	ctx context.Context,
 	text string,
 	audioPath string,
 	speedRatio float64,
-) (*noveltools.TTSResult, error) {
-	result := &noveltools.TTSResult{
+) (*Result, error) {
+	result := &Result{
 		Success:   false,
 		AudioPath: audioPath,
 	}
@@ -238,7 +261,7 @@ func (c *TTSClient) GenerateVoiceWithTimestamps(
 }
 
 // buildRequestConfig 构建请求配置
-func (c *TTSClient) buildRequestConfig(text, requestID string, speedRatio float64) map[string]interface{} {
+func (c *Client) buildRequestConfig(text, requestID string, speedRatio float64) map[string]interface{} {
 	// 参考 Python 代码的请求配置格式和模板
 	appConfig := map[string]interface{}{
 		"token":   c.accessToken,
@@ -271,12 +294,12 @@ func (c *TTSClient) buildRequestConfig(text, requestID string, speedRatio float6
 }
 
 // parseTimestampData 解析时间戳数据
-func (c *TTSClient) parseTimestampData(apiResp map[string]interface{}, text, audioPath string) *noveltools.TimestampData {
-	timestampData := &noveltools.TimestampData{
+func (c *Client) parseTimestampData(apiResp map[string]interface{}, text, audioPath string) *TimestampData {
+	timestampData := &TimestampData{
 		Text:                text,
 		AudioFile:           audioPath,
 		Duration:            0,
-		CharacterTimestamps: []noveltools.CharTimestamp{},
+		CharacterTimestamps: []CharTimestamp{},
 		GeneratedAt:         time.Now(),
 	}
 
@@ -314,13 +337,13 @@ func (c *TTSClient) parseTimestampData(apiResp map[string]interface{}, text, aud
 }
 
 // parseFrontendData 解析前端数据中的时间戳
-func (c *TTSClient) parseFrontendData(frontendData map[string]interface{}, timestampData *noveltools.TimestampData) {
+func (c *Client) parseFrontendData(frontendData map[string]interface{}, timestampData *TimestampData) {
 	words, ok := frontendData["words"].([]interface{})
 	if !ok {
 		return
 	}
 
-	var charTimestamps []noveltools.CharTimestamp
+	var charTimestamps []CharTimestamp
 	for _, wordItem := range words {
 		wordInfo, ok := wordItem.(map[string]interface{})
 		if !ok {
@@ -343,7 +366,7 @@ func (c *TTSClient) parseFrontendData(frontendData map[string]interface{}, times
 					charStartTime := startTime + float64(i)*charDuration
 					charEndTime := startTime + float64(i+1)*charDuration
 
-					charTimestamps = append(charTimestamps, noveltools.CharTimestamp{
+					charTimestamps = append(charTimestamps, CharTimestamp{
 						Character: string(char),
 						StartTime: charStartTime,
 						EndTime:   charEndTime,
@@ -357,7 +380,7 @@ func (c *TTSClient) parseFrontendData(frontendData map[string]interface{}, times
 }
 
 // fixJSON 修复 JSON 字符串（参考 Python 代码的修复逻辑）
-func (c *TTSClient) fixJSON(jsonStr string) string {
+func (c *Client) fixJSON(jsonStr string) string {
 	// 策略1: 修复缺少逗号的问题
 	fixed := jsonStr
 	fixed = strings.ReplaceAll(fixed, "}{", "},{")

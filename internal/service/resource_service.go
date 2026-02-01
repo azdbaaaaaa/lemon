@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
+	"go.mongodb.org/mongo-driver/mongo"
 
 	"lemon/internal/model/resource"
 	"lemon/internal/pkg/id"
@@ -72,10 +73,14 @@ type resourceService struct {
 }
 
 // NewResourceService 创建资源服务
+// 只需要传入必要的依赖，repository 在内部自动创建
 func NewResourceService(
-	resourceRepo *resourceRepo.ResourceRepo,
+	db *mongo.Database,
 	storage storage.Storage,
 ) ResourceService {
+	// 初始化 repository
+	resourceRepo := resourceRepo.NewResourceRepo(db)
+
 	return &resourceService{
 		resourceRepo: resourceRepo,
 		storage:      storage,
