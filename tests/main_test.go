@@ -9,6 +9,8 @@
 //   - KEEP_TEST_DATA: 设置为 "true" 时，测试完成后保留数据库数据和存储文件（默认: false，会自动清理）
 //   - 测试使用本地文件系统存储（临时目录）
 //   - 测试完成后默认会自动清理测试数据库和临时存储文件
+//   - 注意：如果所有集合都被删除，MongoDB 可能会自动删除空数据库，导致看不到数据库
+//   - 建议：使用 KEEP_TEST_DATA=true 来保留测试数据，或使用 MongoDB 客户端手动查看数据
 package tests
 
 import (
@@ -30,10 +32,10 @@ import (
 	"lemon/internal/pkg/noveltools/providers"
 	"lemon/internal/pkg/storage"
 	"lemon/internal/pkg/storagefactory"
-	narrationRepo "lemon/internal/repository/narration"
 	novelrepo "lemon/internal/repository/novel"
 	resourceRepo "lemon/internal/repository/resource"
 	"lemon/internal/service"
+	novelservice "lemon/internal/service/novel"
 
 	"lemon/internal/model/novel"
 	"lemon/internal/pkg/id"
@@ -89,63 +91,57 @@ func TestMain(m *testing.M) {
 
 	// 3. 初始化 LLM Provider（从环境变量读取配置）
 	var llmProvider noveltools.LLMProvider
-	apiKey := os.Getenv("ARK_API_KEY")
-	fmt.Fprintf(os.Stderr, "[TestMain] 读取 ARK_API_KEY: %s (长度: %d)\n",
-		func() string {
-			if apiKey == "" {
-				return "未设置"
-			}
-			if len(apiKey) > 8 {
-				return apiKey[:8] + "..."
-			}
-			return apiKey
-		}(), len(apiKey))
-
-	if apiKey != "" {
-		aiCfg := &config.AIConfig{
-			Provider: "ark",
-			APIKey:   apiKey,
-			Model:    os.Getenv("ARK_MODEL"),
-			BaseURL:  os.Getenv("ARK_BASE_URL"),
-		}
-		if aiCfg.Model == "" {
-			aiCfg.Model = "doubao-seed-1-6-flash-250615"
-		}
-		if aiCfg.BaseURL == "" {
-			aiCfg.BaseURL = "https://ark.cn-beijing.volces.com/api/v3"
-		}
-
-		fmt.Fprintf(os.Stderr, "[TestMain] 尝试创建 Ark 客户端: Model=%s, BaseURL=%s\n",
-			aiCfg.Model, aiCfg.BaseURL)
-		arkClient, err := ark.NewClient(aiCfg)
-		if err == nil {
-			llmProvider = providers.NewArkProvider(arkClient)
-			fmt.Fprintf(os.Stderr, "[TestMain] ✓ 已初始化真实的 LLM Provider (Ark)\n")
-		} else {
-			fmt.Fprintf(os.Stderr, "[TestMain] ✗ 初始化 LLM Provider 失败: %v，将使用 nil\n", err)
-		}
-	} else {
-		fmt.Fprintf(os.Stderr, "[TestMain] ✗ ARK_API_KEY 未设置，LLM Provider 为 nil（某些测试可能需要）\n")
+	aiCfg := ark.ArkConfigFromEnv()
+	arkClient, err := ark.NewClient(aiCfg)
+	if err != nil {
+		panic(fmt.Sprintf("初始化 LLM Provider 失败: %v", err))
 	}
+	llmProvider = providers.NewArkProvider(arkClient)
+	fmt.Fprintf(os.Stderr, "[TestMain] ✓ 已初始化真实的 LLM Provider (Ark)\n")
 
-	// 4. 初始化测试服务
-	testServices = setupTestServices(testDB, testStorage, llmProvider)
+	// 4. 初始化 TTS Provider（从环境变量读取配置）
+	var ttsProvider noveltools.TTSProvider
+	ttsConfig := ark.TTSConfigFromEnv()
+	ttsClient, err := ark.NewTTSClient(ttsConfig)
+	if err != nil {
+		panic(fmt.Sprintf("初始化 TTS Provider 失败: %v", err))
+	}
+	ttsProvider = providers.NewByteDanceTTSProvider(ttsClient)
+	fmt.Fprintf(os.Stderr, "[TestMain] ✓ 已初始化真实的 TTS Provider\n")
 
-	// 5. 设置清理函数
-	keepTestData := os.Getenv("KEEP_TEST_DATA") == "true"
+	// 5. 初始化测试服务
+	testServices = setupTestServices(testDB, testStorage, llmProvider, ttsProvider)
+
+	// 6. 设置清理函数
+	keepTestDataEnv := os.Getenv("KEEP_TEST_DATA")
+	keepTestData := keepTestDataEnv == "true"
+	fmt.Fprintf(os.Stderr, "[TestMain] KEEP_TEST_DATA 环境变量值: %q, keepTestData=%v\n", keepTestDataEnv, keepTestData)
 	testCleanup = func() {
 		if !keepTestData {
-			// 清理数据库集合
-			_ = testDB.Collection("resources").Drop(testCtx)
-			_ = testDB.Collection("upload_sessions").Drop(testCtx)
-			_ = testDB.Collection("novels").Drop(testCtx)
-			_ = testDB.Collection("chapters").Drop(testCtx)
-			_ = testDB.Collection("narrations").Drop(testCtx)
+			// 清理数据库集合（按顺序删除，避免依赖问题）
+			// 注意：删除集合不会删除数据库本身，但如果所有集合都被删除，MongoDB 可能会在下次访问时自动删除空数据库
+			collections := []string{
+				"subtitles",       // 先删除依赖的集合
+				"audios",          // 再删除依赖的集合
+				"narrations",      // 然后删除解说文案
+				"chapters",        // 删除章节
+				"novels",          // 删除小说
+				"upload_sessions", // 删除上传会话
+				"resources",       // 最后删除资源
+			}
+			for _, collName := range collections {
+				if err := testDB.Collection(collName).Drop(testCtx); err != nil {
+					// 集合不存在时忽略错误
+					_ = err
+				}
+			}
 			// 清理存储文件
 			_ = os.RemoveAll(testStorageDir)
+			fmt.Fprintf(os.Stderr, "[TestMain] 已清理测试数据：数据库=%s, 存储目录=%s\n", testDB.Name(), testStorageDir)
 		} else {
 			// 保留数据，只记录日志（使用 os.Stderr 确保输出可见）
-			fmt.Fprintf(os.Stderr, "保留测试数据：数据库=%s, 存储目录=%s\n", testDB.Name(), testStorageDir)
+			fmt.Fprintf(os.Stderr, "[TestMain] 保留测试数据：数据库=%s, 存储目录=%s\n", testDB.Name(), testStorageDir)
+			fmt.Fprintf(os.Stderr, "[TestMain] 提示：使用 MongoDB 客户端连接查看数据，数据库名称: %s\n", testDB.Name())
 		}
 		_ = testMongoClient.Disconnect(testCtx)
 	}
@@ -253,7 +249,6 @@ func setupTestEnvironment(t *testing.T) (context.Context, *mongo.Database, stora
 
 	testStorage, err := storagefactory.NewStorage(ctx, storageCfg)
 	So(err, ShouldBeNil)
-	So(testStorage, ShouldNotBeNil)
 
 	// 检查是否保留测试数据
 	keepTestData := os.Getenv("KEEP_TEST_DATA") == "true"
@@ -261,11 +256,22 @@ func setupTestEnvironment(t *testing.T) (context.Context, *mongo.Database, stora
 	// 清理函数
 	cleanup := func() {
 		if !keepTestData {
-			// 清理数据库集合
-			_ = db.Collection("resources").Drop(ctx)
-			_ = db.Collection("upload_sessions").Drop(ctx)
-			_ = db.Collection("novels").Drop(ctx)
-			_ = db.Collection("chapters").Drop(ctx)
+			// 清理数据库集合（按顺序删除，避免依赖问题）
+			collections := []string{
+				"subtitles",
+				"audios",
+				"narrations",
+				"chapters",
+				"novels",
+				"upload_sessions",
+				"resources",
+			}
+			for _, collName := range collections {
+				if err := db.Collection(collName).Drop(ctx); err != nil {
+					// 集合不存在时忽略错误
+					_ = err
+				}
+			}
 			// 清理存储文件
 			_ = os.RemoveAll(testStorageDir)
 		} else {
@@ -278,9 +284,9 @@ func setupTestEnvironment(t *testing.T) (context.Context, *mongo.Database, stora
 	return ctx, db, testStorage, cleanup
 }
 
-// uploadTestFile 上传测试文件并返回资源ID（复用第一步上传流程）
+// uploadTestFile 上传测试文件并返回资源ID（使用服务端上传方式）
 // 这是一个辅助函数，用于在后续测试中直接使用已上传的资源
-func uploadTestFile(ctx context.Context, t *testing.T, resourceService *service.ResourceService, testStorage storage.Storage, userID string) string {
+func uploadTestFile(ctx context.Context, t *testing.T, resourceService service.ResourceService, userID string) string {
 	// 读取测试文件
 	novelFilePath := getTestNovelFilePath(t)
 	novelFile, err := os.Open(novelFilePath)
@@ -294,42 +300,27 @@ func uploadTestFile(ctx context.Context, t *testing.T, resourceService *service.
 		t.Fatalf("获取文件信息失败: %v", err)
 	}
 
-	// 准备上传
-	prepareReq := &service.PrepareUploadRequest{
-		UserID:      userID,
-		FileName:    fileStat.Name(),
-		FileSize:    fileStat.Size(),
-		ContentType: "text/plain",
-		Ext:         "txt",
-	}
-
-	prepareResult, err := resourceService.PrepareUpload(ctx, prepareReq)
-	if err != nil {
-		t.Fatalf("准备上传失败: %v", err)
-	}
-
-	// 上传文件
+	// 重置文件指针到开头
 	_, err = novelFile.Seek(0, 0)
 	if err != nil {
 		t.Fatalf("重置文件指针失败: %v", err)
 	}
 
-	_, err = testStorage.Upload(ctx, prepareResult.UploadKey, novelFile, "text/plain")
+	// 使用服务端上传方式（UploadFile）
+	uploadReq := &service.UploadFileRequest{
+		UserID:      userID,
+		FileName:    fileStat.Name(),
+		ContentType: "text/plain",
+		Ext:         "txt",
+		Data:        novelFile,
+	}
+
+	uploadResult, err := resourceService.UploadFile(ctx, uploadReq)
 	if err != nil {
 		t.Fatalf("上传文件失败: %v", err)
 	}
 
-	// 完成上传
-	completeReq := &service.CompleteUploadRequest{
-		SessionID: prepareResult.SessionID,
-	}
-
-	completeResult, err := resourceService.CompleteUpload(ctx, completeReq)
-	if err != nil {
-		t.Fatalf("完成上传失败: %v", err)
-	}
-
-	return completeResult.ResourceID
+	return uploadResult.ResourceID
 }
 
 // findOrCreateTestChapters 查找或创建测试章节
@@ -351,7 +342,7 @@ func findOrCreateTestChapters(ctx context.Context, t *testing.T, services *TestS
 			novelID := firstChapter.NovelID
 
 			// 获取该小说的所有章节
-			chapters, err := services.ChapterRepo.FindByNovelID(ctx, novelID)
+			chapters, err := services.NovelService.GetChapters(ctx, novelID)
 			if err == nil && len(chapters) > 0 {
 				// 验证章节是否有内容
 				hasContent := false
@@ -386,7 +377,7 @@ func findOrCreateTestChapters(ctx context.Context, t *testing.T, services *TestS
 		t.Fatalf("切分章节失败: %v", err)
 	}
 
-	chapters, err := services.ChapterRepo.FindByNovelID(ctx, novelID)
+	chapters, err := services.NovelService.GetChapters(ctx, novelID)
 	if err != nil {
 		t.Fatalf("查询章节失败: %v", err)
 	}
@@ -394,14 +385,55 @@ func findOrCreateTestChapters(ctx context.Context, t *testing.T, services *TestS
 	return novelID, chapters
 }
 
+// findOrCreateTestNarration 查找或创建测试解说文案
+// 优先使用数据库中已有的解说文案（从已有的章节中查找）
+func findOrCreateTestNarration(ctx context.Context, t *testing.T, services *TestServices, userID string) (string, *novel.Narration) {
+	// 1. 先尝试查找已有的章节
+	_, chapters := findOrCreateTestChapters(ctx, t, services, userID)
+	if len(chapters) == 0 {
+		t.Fatal("无法找到或创建测试章节")
+	}
+
+	// 2. 查找第一个章节的解说文案
+	firstChapter := chapters[0]
+	narrationEntity, err := services.NovelService.GetNarration(ctx, firstChapter.ID)
+	if err == nil {
+		// 找到了已有的解说文案
+		return narrationEntity.ID, narrationEntity
+	}
+
+	// 3. 如果没有找到，尝试生成一个（需要 LLM Provider）
+	// 如果 TestMain 成功执行，LLMProvider 一定已初始化
+	// 4. 生成解说文案
+	narrationText, err := services.NovelService.GenerateNarrationForChapter(ctx, firstChapter.ID)
+	if err != nil {
+		t.Fatalf("生成解说文案失败: %v", err)
+	}
+	if narrationText == "" {
+		t.Fatal("生成的解说文案为空")
+	}
+
+	// 5. 再次查询，获取生成的解说文案
+	narrationEntity, err = services.NovelService.GetNarration(ctx, firstChapter.ID)
+	if err != nil {
+		t.Fatalf("查询生成的解说文案失败: %v", err)
+	}
+
+	return narrationEntity.ID, narrationEntity
+}
+
 // findOrUploadTestFile 查找或上传测试文件
 // 优先查找数据库中已有的资源，如果没有找到再上传
 func findOrUploadTestFile(ctx context.Context, t *testing.T, services *TestServices, userID string) string {
 	// 1. 先尝试查找数据库中已有的资源（按创建时间降序，取最新的）
-	resources, _, err := services.ResourceRepo.FindByUserID(ctx, userID, 1, 0)
-	if err == nil && len(resources) > 0 {
+	listResult, err := services.ResourceService.ListResources(ctx, &service.ListResourcesRequest{
+		UserID:   userID,
+		Page:     1,
+		PageSize: 1,
+	})
+	if err == nil && len(listResult.Resources) > 0 {
 		// 找到了已有的资源，直接使用
-		resource := resources[0]
+		resource := listResult.Resources[0]
 		// 验证资源状态是 ready
 		if resource.Status == "ready" {
 			t.Logf("使用数据库中已有的资源: %s (文件名: %s)", resource.ID, resource.Name)
@@ -411,7 +443,7 @@ func findOrUploadTestFile(ctx context.Context, t *testing.T, services *TestServi
 
 	// 2. 如果没有找到或资源状态不对，则上传新文件
 	t.Logf("未找到可用的资源，开始上传新文件...")
-	return uploadTestFile(ctx, t, services.ResourceService, services.Storage, userID)
+	return uploadTestFile(ctx, t, services.ResourceService, userID)
 }
 
 // TestServices 测试服务集合
@@ -421,28 +453,44 @@ type TestServices struct {
 	ResourceRepo  *resourceRepo.ResourceRepo
 	NovelRepo     novelrepo.NovelRepository
 	ChapterRepo   novelrepo.ChapterRepository
-	NarrationRepo narrationRepo.NarrationRepository
+	NarrationRepo novelrepo.NarrationRepository
 
 	// 服务
-	ResourceService *service.ResourceService
-	NovelService    *service.NovelService
+	ResourceService service.ResourceService
+	NovelService    novelservice.NovelService
 
 	// 存储
 	Storage storage.Storage
 
 	// LLM Provider（用于生成解说文案）
 	LLMProvider noveltools.LLMProvider
+
+	// TTS Provider（用于生成音频）
+	TTSProvider noveltools.TTSProvider
 }
 
 // setupTestServices 初始化测试服务（仓库和服务）
-func setupTestServices(db *mongo.Database, testStorage storage.Storage, llmProvider noveltools.LLMProvider) *TestServices {
+func setupTestServices(db *mongo.Database, testStorage storage.Storage, llmProvider noveltools.LLMProvider, ttsProvider noveltools.TTSProvider) *TestServices {
 	resourceRepo := resourceRepo.NewResourceRepo(db)
 	novelRepo := novelrepo.NewNovelRepo(db)
 	chapterRepo := novelrepo.NewChapterRepo(db)
-	narrationRepo := narrationRepo.NewNarrationRepo(db)
+	narrationRepo := novelrepo.NewNarrationRepo(db)
+
+	audioRepo := novelrepo.NewAudioRepo(db)
+	subtitleRepo := novelrepo.NewSubtitleRepo(db)
 
 	resourceService := service.NewResourceService(resourceRepo, testStorage)
-	novelService := service.NewNovelService(resourceRepo, novelRepo, chapterRepo, narrationRepo, testStorage, llmProvider)
+	novelService := novelservice.NewNovelService(
+		resourceService,
+		novelRepo,
+		chapterRepo,
+		narrationRepo,
+		audioRepo,
+		subtitleRepo,
+		testStorage,
+		llmProvider,
+		ttsProvider,
+	)
 
 	return &TestServices{
 		ResourceRepo:    resourceRepo,
@@ -453,5 +501,6 @@ func setupTestServices(db *mongo.Database, testStorage storage.Storage, llmProvi
 		NovelService:    novelService,
 		Storage:         testStorage,
 		LLMProvider:     llmProvider,
+		TTSProvider:     ttsProvider,
 	}
 }

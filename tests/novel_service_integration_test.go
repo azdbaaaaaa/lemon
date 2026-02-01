@@ -18,10 +18,10 @@ import (
 	. "github.com/smartystreets/goconvey/convey"
 
 	"lemon/internal/pkg/id"
-	narrationRepo "lemon/internal/repository/narration"
 	novelrepo "lemon/internal/repository/novel"
 	resourceRepo "lemon/internal/repository/resource"
 	"lemon/internal/service"
+	novelservice "lemon/internal/service/novel"
 )
 
 func TestNovelService_Integration(t *testing.T) {
@@ -33,11 +33,23 @@ func TestNovelService_Integration(t *testing.T) {
 		resourceRepo := resourceRepo.NewResourceRepo(db)
 		novelRepo := novelrepo.NewNovelRepo(db)
 		chapterRepo := novelrepo.NewChapterRepo(db)
-		narrationRepo := narrationRepo.NewNarrationRepo(db)
+		narrationRepo := novelrepo.NewNarrationRepo(db)
+		audioRepo := novelrepo.NewAudioRepo(db)
+		subtitleRepo := novelrepo.NewSubtitleRepo(db)
 
 		// 初始化服务
 		resourceService := service.NewResourceService(resourceRepo, testStorage)
-		novelService := service.NewNovelService(resourceRepo, novelRepo, chapterRepo, narrationRepo, testStorage, nil)
+		novelService := novelservice.NewNovelService(
+			resourceService,
+			novelRepo,
+			chapterRepo,
+			narrationRepo,
+			audioRepo,
+			subtitleRepo,
+			testStorage,
+			nil, // llmProvider
+			nil, // ttsProvider
+		)
 
 		// 读取测试文件
 		novelFilePath := getTestNovelFilePath(t)
@@ -67,7 +79,6 @@ func TestNovelService_Integration(t *testing.T) {
 
 			prepareResult, err := resourceService.PrepareUpload(ctx, prepareReq)
 			So(err, ShouldBeNil)
-			So(prepareResult, ShouldNotBeNil)
 			So(prepareResult.SessionID, ShouldNotBeEmpty)
 
 			// 上传文件内容到本地存储
@@ -84,7 +95,6 @@ func TestNovelService_Integration(t *testing.T) {
 
 			completeResult, err := resourceService.CompleteUpload(ctx, completeReq)
 			So(err, ShouldBeNil)
-			So(completeResult, ShouldNotBeNil)
 			So(completeResult.ResourceID, ShouldNotBeEmpty)
 
 			Convey("步骤2: 创建小说", func() {
@@ -99,13 +109,12 @@ func TestNovelService_Integration(t *testing.T) {
 
 					Convey("验证结果", func() {
 						// 验证小说存在
-						novelEntity, err := novelRepo.FindByID(ctx, novelID)
+						novelEntity, err := novelService.GetNovel(ctx, novelID)
 						So(err, ShouldBeNil)
-						So(novelEntity, ShouldNotBeNil)
 						So(novelEntity.ResourceID, ShouldEqual, completeResult.ResourceID)
 
 						// 验证章节已创建
-						chapters, err := chapterRepo.FindByNovelID(ctx, novelID)
+						chapters, err := novelService.GetChapters(ctx, novelID)
 						So(err, ShouldBeNil)
 						So(len(chapters), ShouldBeGreaterThan, 0)
 						So(len(chapters), ShouldBeLessThanOrEqualTo, targetChapters+10) // 允许一些误差

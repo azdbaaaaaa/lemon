@@ -1,11 +1,13 @@
 package noveltools
 
 import (
-	"regexp"
-	"strings"
+	"fmt"
+
+	"lemon/internal/model/novel"
 )
 
 // NarrationExtractor 解说内容提取器
+// 用于从解说文案内容中提取所有解说文本
 type NarrationExtractor struct{}
 
 // NewNarrationExtractor 创建解说内容提取器实例
@@ -13,25 +15,52 @@ func NewNarrationExtractor() *NarrationExtractor {
 	return &NarrationExtractor{}
 }
 
-// ExtractNarrationContent 从narration文本中提取所有解说内容
-// 参考 Python 脚本 gen_audio.py 的 extract_narration_content 函数
-func (ne *NarrationExtractor) ExtractNarrationContent(narrationText string) []string {
-	narrationContents := []string{}
+// ExtractNarrationTexts 从解说文案内容中提取所有解说文本
+// 参考 Python 的 extract_narration_content，但适配结构体格式
+//
+// Args:
+//   - content: 解说文案的 Content 字段（*NarrationContent）
+//
+// Returns:
+//   - []string: 所有解说文本列表（按顺序）
+//   - error: 错误信息
+func (ne *NarrationExtractor) ExtractNarrationTexts(content *novel.NarrationContent) ([]string, error) {
+	if content == nil {
+		return nil, fmt.Errorf("content is nil")
+	}
 
-	// 使用正则表达式提取所有<解说内容>标签中的内容
-	// 注意：文件中的解说内容标签可能没有结束标签，内容直接跟在开始标签后面直到下一个标签
-	pattern := regexp.MustCompile(`<解说内容>([^<]+)`)
-	matches := pattern.FindAllStringSubmatch(narrationText, -1)
+	if len(content.Scenes) == 0 {
+		return nil, fmt.Errorf("scenes field is missing or empty")
+	}
 
-	for _, match := range matches {
-		if len(match) > 1 {
-			// 清理文本，移除多余的空白字符
-			cleanNarration := strings.TrimSpace(match[1])
-			if cleanNarration != "" {
-				narrationContents = append(narrationContents, cleanNarration)
+	var narrationTexts []string
+
+	for _, scene := range content.Scenes {
+		if scene == nil {
+			continue
+		}
+
+		// 分镜级别的解说内容（可选）
+		if scene.Narration != "" {
+			narrationTexts = append(narrationTexts, scene.Narration)
+		}
+
+		// 特写级别的解说内容
+		if scene.Shots != nil {
+			for _, shot := range scene.Shots {
+				if shot == nil {
+					continue
+				}
+				if shot.Narration != "" {
+					narrationTexts = append(narrationTexts, shot.Narration)
+				}
 			}
 		}
 	}
 
-	return narrationContents
+	if len(narrationTexts) == 0 {
+		return nil, fmt.Errorf("no narration texts found in content")
+	}
+
+	return narrationTexts, nil
 }

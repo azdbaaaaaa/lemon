@@ -60,23 +60,46 @@ func (ng *NarrationGenerator) Generate(
 	chapterNum int,
 	totalChapters int,
 ) (string, error) {
+	_, narration, err := ng.GenerateWithPrompt(ctx, chapterContent, chapterNum, totalChapters)
+	return narration, err
+}
+
+// GenerateWithPrompt 生成单章节解说，并返回使用的提示词
+//
+// Args:
+//   - ctx: 上下文
+//   - chapterContent: 章节原始内容
+//   - chapterNum: 当前章节编号（从 1 开始）
+//   - totalChapters: 总章节数
+//
+// Returns:
+//   - prompt: 使用的提示词
+//   - narration: 大模型生成的解说文案
+//   - err: 错误信息
+func (ng *NarrationGenerator) GenerateWithPrompt(
+	ctx context.Context,
+	chapterContent string,
+	chapterNum int,
+	totalChapters int,
+) (string, string, error) {
 	if ng.llmProvider == nil {
-		return "", fmt.Errorf("llmProvider is required")
+		return "", "", fmt.Errorf("llmProvider is required")
 	}
 	chapterContent = strings.TrimSpace(chapterContent)
 	if chapterContent == "" {
-		return "", fmt.Errorf("chapterContent is empty")
+		return "", "", fmt.Errorf("chapterContent is empty")
 	}
 	if chapterNum <= 0 || totalChapters <= 0 {
-		return "", fmt.Errorf("invalid chapter number or totalChapters")
+		return "", "", fmt.Errorf("invalid chapter number or totalChapters")
 	}
 
 	prompt := buildChapterNarrationPrompt(chapterContent, chapterNum, totalChapters)
-	return ng.llmProvider.Generate(ctx, prompt)
+	narration, err := ng.llmProvider.Generate(ctx, prompt)
+	return prompt, narration, err
 }
 
 // buildChapterNarrationPrompt 构造章节解说的提示词
-// 要求生成 JSON 格式的结构化数据，而不是 XML
+// 要求生成 JSON 格式的结构化数据
 func buildChapterNarrationPrompt(chapterContent string, chapterNum, totalChapters int) string {
 	var b strings.Builder
 	b.WriteString("你是一名专业的中文小说解说文案撰写助手。\n")

@@ -111,9 +111,12 @@ func normalizeNovelText(s string) string {
 }
 
 var chapterTitlePatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?im)^第[一二三四五六七八九十百千万0-9\d]+章[^\n]*`),
-	regexp.MustCompile(`(?im)^chapter\s*\d+[^\n]*`),
-	regexp.MustCompile(`(?im)^章节\s*\d+[^\n]*`),
+	// 匹配中文章节标题：允许行首有空白字符，支持"第X章"或"第X章 标题"格式
+	regexp.MustCompile(`(?m)^\s*第[一二三四五六七八九十百千万0-9\d]+章[^\n]*`),
+	// 匹配英文章节标题：允许行首有空白字符
+	regexp.MustCompile(`(?m)^\s*chapter\s+\d+[^\n]*`),
+	// 匹配"章节 N"格式：允许行首有空白字符
+	regexp.MustCompile(`(?m)^\s*章节\s+\d+[^\n]*`),
 }
 
 func splitByChapterTitles(novelContent string, minLength int) []string {

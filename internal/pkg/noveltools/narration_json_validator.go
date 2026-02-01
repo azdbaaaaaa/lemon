@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"lemon/internal/model/novel"
 )
 
 // cleanJSONContent 清理 LLM 返回的 JSON 内容
@@ -37,7 +39,7 @@ func cleanJSONContent(content string) string {
 
 // ValidateNarrationJSON 验证 JSON 格式的解说文案
 // 返回解析后的结构化数据和验证结果
-func ValidateNarrationJSON(jsonContent string, minLength, maxLength int) (map[string]interface{}, *ValidationResult) {
+func ValidateNarrationJSON(jsonContent string, minLength, maxLength int) (*novel.NarrationContent, *ValidationResult) {
 	result := &ValidationResult{
 		IsValid:  true,
 		Warnings: make([]string, 0),
@@ -53,58 +55,49 @@ func ValidateNarrationJSON(jsonContent string, minLength, maxLength int) (map[st
 		return nil, result
 	}
 
-	// 尝试解析 JSON
-	var structuredData map[string]interface{}
-	if err := json.Unmarshal([]byte(jsonContent), &structuredData); err != nil {
+	// 尝试解析 JSON 到结构体
+	var content novel.NarrationContent
+	if err := json.Unmarshal([]byte(jsonContent), &content); err != nil {
 		result.IsValid = false
 		result.Message = fmt.Sprintf("JSON 解析失败: %v", err)
 		return nil, result
 	}
 
 	// 验证基本结构
-	if structuredData["scenes"] == nil {
+	if len(content.Scenes) == 0 {
 		result.IsValid = false
-		result.Message = "缺少 scenes 字段"
+		result.Message = "缺少 scenes 字段或 scenes 为空"
 		return nil, result
 	}
 
-	scenes, ok := structuredData["scenes"].([]interface{})
-	if !ok {
-		result.IsValid = false
-		result.Message = "scenes 字段格式错误，应为数组"
-		return nil, result
-	}
-
-	if len(scenes) < 7 {
+	if len(content.Scenes) < 7 {
 		result.Warnings = append(result.Warnings,
-			fmt.Sprintf("分镜数量不足，期望至少7个，实际%d个，但继续生成", len(scenes)))
+			fmt.Sprintf("分镜数量不足，期望至少7个，实际%d个，但继续生成", len(content.Scenes)))
 	}
 
 	// 提取所有解说内容并统计字数
 	totalExplanationText := ""
 	explanationCount := 0
 
-	for _, sceneInterface := range scenes {
-		scene, ok := sceneInterface.(map[string]interface{})
-		if !ok {
+	for _, scene := range content.Scenes {
+		if scene == nil {
 			continue
 		}
 
-		// 分镜级别的解说内容
-		if narration, ok := scene["narration"].(string); ok && narration != "" {
-			totalExplanationText += narration
+		// 分镜级别的解说内容（可选）
+		if scene.Narration != "" {
+			totalExplanationText += scene.Narration
 			explanationCount++
 		}
 
 		// 特写级别的解说内容
-		if shots, ok := scene["shots"].([]interface{}); ok {
-			for _, shotInterface := range shots {
-				shot, ok := shotInterface.(map[string]interface{})
-				if !ok {
+		if scene.Shots != nil {
+			for _, shot := range scene.Shots {
+				if shot == nil {
 					continue
 				}
-				if narration, ok := shot["narration"].(string); ok && narration != "" {
-					totalExplanationText += narration
+				if shot.Narration != "" {
+					totalExplanationText += shot.Narration
 					explanationCount++
 				}
 			}
@@ -127,34 +120,30 @@ func ValidateNarrationJSON(jsonContent string, minLength, maxLength int) (map[st
 	}
 
 	// 验证分镜1的第一个和第二个特写的字数
-	if len(scenes) > 0 {
-		firstScene, ok := scenes[0].(map[string]interface{})
-		if ok {
-			if shots, ok := firstScene["shots"].([]interface{}); ok && len(shots) > 0 {
-				firstShot, ok := shots[0].(map[string]interface{})
-				if ok {
-					if narration, ok := firstShot["narration"].(string); ok {
-						charCount := countChineseCharacters(narration)
-						result.FirstCloseup = &CloseupValidation{
-							Content:   narration,
-							CharCount: charCount,
-							Valid:     30 <= charCount && charCount <= 32,
-							Exists:    true,
-						}
+	if len(content.Scenes) > 0 {
+		firstScene := content.Scenes[0]
+		if firstScene != nil && firstScene.Shots != nil {
+			if len(firstScene.Shots) > 0 {
+				firstShot := firstScene.Shots[0]
+				if firstShot != nil && firstShot.Narration != "" {
+					charCount := countChineseCharacters(firstShot.Narration)
+					result.FirstCloseup = &CloseupValidation{
+						Content:   firstShot.Narration,
+						CharCount: charCount,
+						Valid:     30 <= charCount && charCount <= 32,
+						Exists:    true,
 					}
 				}
 			}
-			if shots, ok := firstScene["shots"].([]interface{}); ok && len(shots) > 1 {
-				secondShot, ok := shots[1].(map[string]interface{})
-				if ok {
-					if narration, ok := secondShot["narration"].(string); ok {
-						charCount := countChineseCharacters(narration)
-						result.SecondCloseup = &CloseupValidation{
-							Content:   narration,
-							CharCount: charCount,
-							Valid:     30 <= charCount && charCount <= 32,
-							Exists:    true,
-						}
+			if len(firstScene.Shots) > 1 {
+				secondShot := firstScene.Shots[1]
+				if secondShot != nil && secondShot.Narration != "" {
+					charCount := countChineseCharacters(secondShot.Narration)
+					result.SecondCloseup = &CloseupValidation{
+						Content:   secondShot.Narration,
+						CharCount: charCount,
+						Valid:     30 <= charCount && charCount <= 32,
+						Exists:    true,
 					}
 				}
 			}
@@ -163,7 +152,7 @@ func ValidateNarrationJSON(jsonContent string, minLength, maxLength int) (map[st
 
 	result.Message = "验证通过"
 	result.TotalLength = explanationLength
-	return structuredData, result
+	return &content, result
 }
 
 // countChineseCharacters 计算中文字符数量

@@ -12,13 +12,14 @@ import (
 // Subtitle 字幕实体
 // 说明：每个章节的音频会生成一个字幕文件（ASS格式）
 type Subtitle struct {
-	ID                 string     `bson:"id" json:"id"`                                 // 字幕ID（UUID）
-	ChapterID          string     `bson:"chapter_id" json:"chapter_id"`                 // 关联的章节ID
-	NarrationID        string     `bson:"narration_id" json:"narration_id"`             // 关联的解说文案ID
-	UserID             string     `bson:"user_id" json:"user_id"`                       // 用户ID
+	ID                 string     `bson:"id" json:"id"`                                     // 字幕ID（UUID）
+	ChapterID          string     `bson:"chapter_id" json:"chapter_id"`                     // 关联的章节ID
+	NarrationID        string     `bson:"narration_id" json:"narration_id"`                 // 关联的解说文案ID
+	UserID             string     `bson:"user_id" json:"user_id"`                           // 用户ID
 	SubtitleResourceID string     `bson:"subtitle_resource_id" json:"subtitle_resource_id"` // 字幕文件的 resource_id
-	Format             string     `bson:"format" json:"format"`                         // 字幕格式：ass, srt, vtt
-	Status             string     `bson:"status" json:"status"`                        // 状态：pending, completed, failed
+	Format             string     `bson:"format" json:"format"`                             // 字幕格式：ass, srt, vtt
+	Prompt             string     `bson:"prompt,omitempty" json:"prompt,omitempty"`         // 生成字幕时使用的提示词/参数（字幕生成参数配置）
+	Status             string     `bson:"status" json:"status"`                             // 状态：pending, completed, failed
 	CreatedAt          time.Time  `bson:"created_at" json:"created_at"`
 	UpdatedAt          time.Time  `bson:"updated_at" json:"updated_at"`
 	DeletedAt          *time.Time `bson:"deleted_at,omitempty" json:"deleted_at,omitempty"`

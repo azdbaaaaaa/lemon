@@ -41,81 +41,66 @@ func TestResourceService_UploadTXT(t *testing.T) {
 
 		userID := "test_user_upload_001"
 
-		Convey("步骤1: 上传文件到存储", func() {
-			// 准备上传（创建上传会话，但不验证返回值）
-			prepareReq := &service.PrepareUploadRequest{
-				UserID:      userID,
-				FileName:    fileStat.Name(),
-				FileSize:    fileStat.Size(),
-				ContentType: "text/plain",
-				Ext:         "txt",
-			}
-
-			prepareResult, err := services.ResourceService.PrepareUpload(ctx, prepareReq)
-			So(err, ShouldBeNil)
-			So(prepareResult, ShouldNotBeNil)
-			sessionID := prepareResult.SessionID
-			uploadKey := prepareResult.UploadKey
-
+		Convey("步骤1: 使用服务端上传方式上传文件", func() {
 			// 重置文件指针到开头
 			_, err = novelFile.Seek(0, 0)
 			So(err, ShouldBeNil)
 
-			// 上传文件
-			uploadURL, err := services.Storage.Upload(ctx, uploadKey, novelFile, "text/plain")
+			// 使用服务端上传方式（UploadFile）
+			uploadReq := &service.UploadFileRequest{
+				UserID:      userID,
+				FileName:    fileStat.Name(),
+				ContentType: "text/plain",
+				Ext:         "txt",
+				Data:        novelFile,
+			}
+
+			uploadResult, err := services.ResourceService.UploadFile(ctx, uploadReq)
 			So(err, ShouldBeNil)
-			So(uploadURL, ShouldNotBeEmpty)
+			So(uploadResult.ResourceID, ShouldNotBeEmpty)
+			So(uploadResult.FileSize, ShouldEqual, fileStat.Size())
 
-			// 验证文件已上传
-			exists, err := services.Storage.Exists(ctx, uploadKey)
-			So(err, ShouldBeNil)
-			So(exists, ShouldBeTrue)
-
-			Convey("步骤2: 完成上传（创建资源记录）", func() {
-				completeReq := &service.CompleteUploadRequest{
-					SessionID: sessionID,
-					// MD5 和 SHA256 可选，这里不提供
-				}
-
-				completeResult, err := services.ResourceService.CompleteUpload(ctx, completeReq)
+			Convey("步骤2: 验证资源记录", func() {
+				// 查询资源详情
+				resourceResult, err := services.ResourceService.GetResource(ctx, &service.GetResourceRequest{
+					ResourceID: uploadResult.ResourceID,
+					UserID:     userID,
+				})
 				So(err, ShouldBeNil)
-				So(completeResult, ShouldNotBeNil)
-				So(completeResult.ResourceID, ShouldNotBeEmpty)
-				So(completeResult.FileSize, ShouldEqual, fileStat.Size())
+				resourceEntity := resourceResult.Resource
+				So(resourceEntity.UserID, ShouldEqual, userID)
+				So(resourceEntity.Name, ShouldEqual, fileStat.Name())
+				So(resourceEntity.Ext, ShouldEqual, "txt")
+				So(resourceEntity.FileSize, ShouldEqual, fileStat.Size())
+				So(resourceEntity.ContentType, ShouldEqual, "text/plain")
+				So(resourceEntity.StorageKey, ShouldNotBeEmpty)
+				So(resourceEntity.StorageType, ShouldEqual, "local")
+				So(string(resourceEntity.Status), ShouldEqual, "ready")
 
-				Convey("步骤3: 验证资源记录", func() {
-					// 查询资源详情
-					resourceEntity, err := services.ResourceRepo.FindByID(ctx, completeResult.ResourceID)
+				Convey("步骤3: 验证可以下载文件", func() {
+					// 获取下载URL
+					downloadReq := &service.GetDownloadURLRequest{
+						UserID:     userID,
+						ResourceID: uploadResult.ResourceID,
+						ExpiresIn:  time.Hour,
+					}
+					downloadResult, err := services.ResourceService.GetDownloadURL(ctx, downloadReq)
 					So(err, ShouldBeNil)
-					So(resourceEntity, ShouldNotBeNil)
-					So(resourceEntity.UserID, ShouldEqual, userID)
-					So(resourceEntity.Name, ShouldEqual, fileStat.Name())
-					So(resourceEntity.Ext, ShouldEqual, "txt")
-					So(resourceEntity.FileSize, ShouldEqual, fileStat.Size())
-					So(resourceEntity.ContentType, ShouldEqual, "text/plain")
-					So(resourceEntity.StorageKey, ShouldEqual, uploadKey)
-					So(resourceEntity.StorageType, ShouldEqual, "local")
-					So(string(resourceEntity.Status), ShouldEqual, "ready")
+					So(downloadResult.DownloadURL, ShouldNotBeEmpty)
 
-					Convey("步骤4: 验证可以下载文件", func() {
-						// 获取下载URL
-						downloadReq := &service.GetDownloadURLRequest{
-							ResourceID: completeResult.ResourceID,
-							ExpiresIn:  time.Hour,
+					Convey("步骤4: 验证可以下载文件内容", func() {
+						// 使用 DownloadFile 下载文件
+						downloadFileReq := &service.DownloadFileRequest{
+							UserID:     userID,
+							ResourceID: uploadResult.ResourceID,
 						}
-						downloadResult, err := services.ResourceService.GetDownloadURL(ctx, userID, downloadReq)
+						downloadFileResult, err := services.ResourceService.DownloadFile(ctx, downloadFileReq)
 						So(err, ShouldBeNil)
-						So(downloadResult, ShouldNotBeNil)
-						So(downloadResult.DownloadURL, ShouldNotBeEmpty)
-
-						// 下载文件并验证内容
-						reader, err := services.Storage.Download(ctx, uploadKey)
-						So(err, ShouldBeNil)
-						defer reader.Close()
+						defer downloadFileResult.Data.Close()
 
 						// 读取文件内容的前几个字节进行验证
 						buffer := make([]byte, 100)
-						n, err := reader.Read(buffer)
+						n, err := downloadFileResult.Data.Read(buffer)
 						So(err, ShouldBeNil)
 						So(n, ShouldBeGreaterThan, 0)
 

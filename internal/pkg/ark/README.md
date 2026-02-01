@@ -1,14 +1,21 @@
 # Ark 客户端封装
 
-本包提供了火山引擎 Ark API（豆包大模型）的 Go 客户端封装。
+本包提供了火山引擎 Ark API（豆包大模型）和 TTS API（文本转语音）的 Go 客户端封装。
 
 ## 功能特性
 
+### Ark Client（大模型）
 - ✅ 支持聊天完成（Chat Completion）API
 - ✅ 支持自定义模型、温度、MaxTokens 等参数
 - ✅ 提供简化版本的快速调用方法
 - ✅ 线程安全的并发调用
 - ✅ 使用官方 volcengine-go-sdk
+
+### TTS Client（文本转语音）
+- ✅ 支持文本转语音生成
+- ✅ 支持字符级时间戳获取
+- ✅ 支持自定义语速、音色等参数
+- ✅ 自动保存音频文件
 
 ## 安装依赖
 
@@ -29,10 +36,31 @@ go mod tidy
 
 ### 1. 创建客户端
 
+#### 方式1：从环境变量创建（推荐）
+
 ```go
 import "lemon/internal/pkg/ark"
 
-// 从配置创建客户端
+// 从环境变量读取配置
+cfg := ark.ArkConfigFromEnv()
+// 支持的环境变量：
+//   - ARK_API_KEY: API Key（必需）
+//   - ARK_MODEL: 模型名称（可选，默认: doubao-seed-1-6-flash-250615）
+//   - ARK_BASE_URL: API 基础 URL（可选，默认: https://ark.cn-beijing.volces.com/api/v3）
+
+client, err := ark.NewClient(cfg)
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+#### 方式2：手动创建配置
+
+```go
+import "lemon/internal/pkg/ark"
+import "lemon/internal/config"
+
+// 手动创建配置
 cfg := &config.AIConfig{
     Provider: "ark",
     APIKey:   "your-api-key",
@@ -171,7 +199,117 @@ narration := resp.Choices[0].Message.Content
 3. **超时设置**：HTTP 客户端默认超时 60 秒，可根据需要调整
 4. **Rate Limiting**：注意 API 的速率限制，避免频繁调用
 
+## TTS 客户端使用
+
+### 1. 创建 TTS 客户端
+
+#### 方式1：从环境变量创建（推荐）
+
+```go
+import "lemon/internal/pkg/ark"
+
+// 从环境变量读取配置
+ttsConfig := ark.TTSConfigFromEnv()
+// 支持的环境变量：
+//   - TTS_ACCESS_TOKEN: 访问令牌（必需）
+//   - TTS_APP_ID: 应用ID（可选）
+//   - TTS_VOICE_TYPE: 语音类型（可选，默认: BV115_streaming）
+//   - TTS_CLUSTER: 集群名称（可选，默认: volcano_tts）
+//   - TTS_SAMPLE_RATE: 采样率（可选，默认: 44100）
+//   - TTS_API_URL: API 地址（可选，默认: https://openspeech.bytedance.com/api/v1/tts）
+
+ttsClient, err := ark.NewTTSClient(ttsConfig)
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+#### 方式2：手动创建配置
+
+```go
+import "lemon/internal/pkg/ark"
+
+// 手动创建配置
+ttsConfig := ark.TTSConfig{
+    AccessToken: "your-access-token", // 必需
+    AppID:       "your-app-id",      // 可选
+    VoiceType:   "BV115_streaming",  // 可选，默认: BV115_streaming
+    SampleRate:  44100,               // 可选，默认: 44100
+}
+
+ttsClient, err := ark.NewTTSClient(ttsConfig)
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+### 2. 生成语音并获取时间戳
+
+```go
+ctx := context.Background()
+text := "要转换的文本内容"
+audioPath := "/path/to/output.mp3"
+speedRatio := 1.2 // 1.2倍速
+
+result, err := ttsClient.GenerateVoiceWithTimestamps(ctx, text, audioPath, speedRatio)
+if err != nil {
+    log.Error().Err(err).Msg("生成语音失败")
+    return
+}
+
+if result.Success {
+    fmt.Printf("音频已保存到: %s\n", result.AudioPath)
+    fmt.Printf("音频时长: %.2f 秒\n", result.TimestampData.Duration)
+    fmt.Printf("字符数: %d\n", len(result.TimestampData.CharacterTimestamps))
+}
+```
+
+### 3. 在 noveltools 中使用
+
+```go
+import (
+    "lemon/internal/pkg/ark"
+    "lemon/internal/pkg/noveltools/providers"
+)
+
+// 从环境变量创建 TTS 客户端（推荐）
+ttsConfig := ark.TTSConfigFromEnv()
+ttsClient, err := ark.NewTTSClient(ttsConfig)
+if err != nil {
+    log.Fatal(err)
+}
+
+// 创建 TTS Provider（实现 noveltools.TTSProvider 接口）
+ttsProvider := providers.NewByteDanceTTSProvider(ttsClient)
+
+// 在 NovelService 中使用
+novelService := novelservice.NewNovelService(
+    // ... 其他参数
+    ttsProvider,
+)
+```
+
+### TTS 配置说明
+
+- `APIURL`: API 地址（默认：`https://openspeech.bytedance.com/api/v1/tts`）
+- `AccessToken`: 访问令牌（必需）
+- `AppID`: 应用ID（可选）
+- `Cluster`: 集群名称（默认：`volcano_tts`）
+- `VoiceType`: 语音类型（默认：`BV115_streaming`）
+- `SampleRate`: 采样率（默认：`44100`）
+
+### 环境变量配置
+
+可以通过环境变量配置：
+
+```bash
+export TTS_ACCESS_TOKEN="your-access-token"
+export TTS_APP_ID="your-app-id"
+export TTS_VOICE_TYPE="BV115_streaming"
+```
+
 ## 参考文档
 
 - [火山引擎 Go SDK](https://github.com/volcengine/volcengine-go-sdk)
 - [Ark API 文档](https://www.volcengine.com/docs/82379)
+- [TTS API 文档](https://openspeech.bytedance.com/api/v1/tts)

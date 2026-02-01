@@ -2,8 +2,12 @@ package service
 
 import (
 	"context"
+	"crypto/md5"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -25,8 +29,44 @@ var (
 	ErrInvalidFileHash       = errors.New("文件哈希值不匹配")
 )
 
-// ResourceService 资源服务
-type ResourceService struct {
+// ResourceService 资源服务接口
+// 定义 resource 模块 service 层提供的能力
+type ResourceService interface {
+	// PrepareUpload 准备上传（创建上传会话）
+	// 生成预签名URL供客户端直传
+	PrepareUpload(ctx context.Context, req *PrepareUploadRequest) (*PrepareUploadResult, error)
+
+	// CompleteUpload 完成上传（确认上传完成）
+	// 客户端上传完成后，验证文件并创建资源记录
+	CompleteUpload(ctx context.Context, req *CompleteUploadRequest) (*CompleteUploadResult, error)
+
+	// GetDownloadURL 获取下载URL（预签名URL）
+	// 用于生成临时访问链接，适用于客户端直接下载
+	// 注意：如果 req.UserID 为空，视为系统内部请求，可以访问所有资源
+	GetDownloadURL(ctx context.Context, req *GetDownloadURLRequest) (*GetDownloadURLResult, error)
+
+	// UploadFile 服务端直接上传文件（不通过上传会话）
+	// 用于服务端生成的文件（如音频、字幕等）直接上传
+	UploadFile(ctx context.Context, req *UploadFileRequest) (*UploadFileResult, error)
+
+	// DownloadFile 下载文件（返回文件流）
+	// 用于服务端需要读取文件内容的场景
+	// 注意：如果 req.UserID 为空，视为系统内部请求，可以访问所有资源
+	DownloadFile(ctx context.Context, req *DownloadFileRequest) (*DownloadFileResult, error)
+
+	// ListResources 查询资源列表
+	// 支持按用户ID、扩展名、状态等条件筛选
+	// 注意：如果 req.UserID 为空，视为系统内部请求，可以查询所有用户的资源
+	ListResources(ctx context.Context, req *ListResourcesRequest) (*ListResourcesResult, error)
+
+	// GetResource 获取资源元数据（不下载文件）
+	// 用于查看资源信息、权限验证等场景
+	// 注意：如果 req.UserID 为空，视为系统内部请求，可以访问所有资源
+	GetResource(ctx context.Context, req *GetResourceRequest) (*GetResourceResult, error)
+}
+
+// resourceService 资源服务实现
+type resourceService struct {
 	resourceRepo *resourceRepo.ResourceRepo
 	storage      storage.Storage
 }
@@ -35,8 +75,8 @@ type ResourceService struct {
 func NewResourceService(
 	resourceRepo *resourceRepo.ResourceRepo,
 	storage storage.Storage,
-) *ResourceService {
-	return &ResourceService{
+) ResourceService {
+	return &resourceService{
 		resourceRepo: resourceRepo,
 		storage:      storage,
 	}
@@ -62,7 +102,7 @@ type PrepareUploadResult struct {
 
 // PrepareUpload 准备上传（创建上传会话）
 // 生成预签名URL供客户端直传
-func (s *ResourceService) PrepareUpload(ctx context.Context, req *PrepareUploadRequest) (*PrepareUploadResult, error) {
+func (s *resourceService) PrepareUpload(ctx context.Context, req *PrepareUploadRequest) (*PrepareUploadResult, error) {
 	// 生成上传会话ID
 	sessionID := id.New()
 
@@ -126,7 +166,7 @@ type CompleteUploadResult struct {
 
 // CompleteUpload 完成上传（确认上传完成）
 // 客户端上传完成后，验证文件并创建资源记录
-func (s *ResourceService) CompleteUpload(ctx context.Context, req *CompleteUploadRequest) (*CompleteUploadResult, error) {
+func (s *resourceService) CompleteUpload(ctx context.Context, req *CompleteUploadRequest) (*CompleteUploadResult, error) {
 	// 验证会话、保存原始资源并更新会话状态
 	originalRes, err := s.createOriginalResource(ctx, req)
 	if err != nil {
@@ -153,7 +193,7 @@ func (s *ResourceService) CompleteUpload(ctx context.Context, req *CompleteUploa
 
 // createOriginalResource 验证会话并创建原始资源记录
 // 创建成功后会自动更新上传会话状态为已完成
-func (s *ResourceService) createOriginalResource(ctx context.Context, req *CompleteUploadRequest) (*resource.Resource, error) {
+func (s *resourceService) createOriginalResource(ctx context.Context, req *CompleteUploadRequest) (*resource.Resource, error) {
 	// 查找上传会话
 	session, err := s.resourceRepo.FindUploadSession(ctx, req.SessionID)
 	if err != nil {
@@ -249,7 +289,7 @@ func (s *ResourceService) createOriginalResource(ctx context.Context, req *Compl
 // processResourceChain 执行资源处理链（脱敏等处理）
 // processResourceChain 原先用于异步执行资源处理链（脱敏、章节切分等）。
 // 目前资源处理链已改为在 service 层显式调用纯函数，因此该方法留空或后续重构为具体业务流程。
-func (s *ResourceService) processResourceChain(ctx context.Context, resourceID string) {
+func (s *resourceService) processResourceChain(ctx context.Context, resourceID string) {
 	// TODO: 在需要时，这里可以显式调用脱敏、章节切分等纯函数工具。
 	_ = ctx
 	_ = resourceID
@@ -257,7 +297,8 @@ func (s *ResourceService) processResourceChain(ctx context.Context, resourceID s
 
 // GetDownloadURLRequest 获取下载URL请求
 type GetDownloadURLRequest struct {
-	ResourceID string
+	UserID     string        // 用户ID（用于权限验证，为空时视为系统内部请求，可访问所有资源）
+	ResourceID string        // 资源ID
 	ExpiresIn  time.Duration // 可选，默认1小时
 }
 
@@ -272,7 +313,7 @@ type GetDownloadURLResult struct {
 }
 
 // GetDownloadURL 获取下载URL（预签名URL）
-func (s *ResourceService) GetDownloadURL(ctx context.Context, userID string, req *GetDownloadURLRequest) (*GetDownloadURLResult, error) {
+func (s *resourceService) GetDownloadURL(ctx context.Context, req *GetDownloadURLRequest) (*GetDownloadURLResult, error) {
 	// 查找资源
 	res, err := s.resourceRepo.FindByID(ctx, req.ResourceID)
 	if err != nil {
@@ -280,7 +321,8 @@ func (s *ResourceService) GetDownloadURL(ctx context.Context, userID string, req
 	}
 
 	// 检查访问权限（用户只能访问自己的资源）
-	if res.UserID != userID {
+	// 如果 userID 为空，视为系统内部请求，跳过权限检查
+	if req.UserID != "" && res.UserID != req.UserID {
 		return nil, ErrResourceAccessDenied
 	}
 
@@ -312,9 +354,143 @@ func (s *ResourceService) GetDownloadURL(ctx context.Context, userID string, req
 	}, nil
 }
 
+// UploadFileRequest 服务端上传文件请求
+type UploadFileRequest struct {
+	UserID      string
+	FileName    string
+	ContentType string
+	Ext         string // 文件扩展名（不含点号）
+	Data        io.Reader
+}
+
+// UploadFileResult 服务端上传文件结果
+type UploadFileResult struct {
+	ResourceID  string `json:"resource_id"`
+	ResourceURL string `json:"resource_url"`
+	FileSize    int64  `json:"file_size"`
+}
+
+// UploadFile 服务端直接上传文件（不通过上传会话）
+// 用于服务端生成的文件（如音频、字幕等）直接上传
+func (s *resourceService) UploadFile(ctx context.Context, req *UploadFileRequest) (*UploadFileResult, error) {
+	if req.Data == nil {
+		return nil, errors.New("文件数据不能为空")
+	}
+
+	// 读取文件数据并计算哈希
+	dataBytes, err := io.ReadAll(req.Data)
+	if err != nil {
+		return nil, fmt.Errorf("读取文件数据失败: %w", err)
+	}
+
+	fileSize := int64(len(dataBytes))
+
+	// 计算 MD5 和 SHA256
+	md5Hash := md5.Sum(dataBytes)
+	sha256Hash := sha256.Sum256(dataBytes)
+	md5Str := hex.EncodeToString(md5Hash[:])
+	sha256Str := hex.EncodeToString(sha256Hash[:])
+
+	// 生成资源ID和存储路径
+	resourceID := id.New()
+	storageKey := s.generateStorageKey(req.UserID, resourceID, req.Ext)
+
+	// 上传文件到存储
+	dataReader := strings.NewReader(string(dataBytes))
+	_, err = s.storage.Upload(ctx, storageKey, dataReader, req.ContentType)
+	if err != nil {
+		log.Error().Err(err).Str("key", storageKey).Msg("failed to upload file")
+		return nil, errors.New("上传文件失败")
+	}
+
+	// 创建资源记录
+	res := &resource.Resource{
+		ID:          resourceID,
+		UserID:      req.UserID,
+		Ext:         req.Ext,
+		Name:        req.FileName,
+		StorageKey:  storageKey,
+		StorageType: s.storage.GetStorageType(),
+		FileSize:    fileSize,
+		ContentType: req.ContentType,
+		MD5:         md5Str,
+		SHA256:      sha256Str,
+		Version:     1,
+		Status:      resource.ResourceStatusReady,
+	}
+
+	if err := s.resourceRepo.Create(ctx, res); err != nil {
+		log.Error().Err(err).Msg("failed to create resource")
+		return nil, errors.New("创建资源记录失败")
+	}
+
+	// 生成资源访问URL
+	resourceURL, err := s.storage.GetPresignedDownloadURL(ctx, storageKey, time.Hour*24)
+	if err != nil {
+		log.Warn().Err(err).Msg("failed to generate resource URL")
+		resourceURL = ""
+	}
+
+	return &UploadFileResult{
+		ResourceID:  resourceID,
+		ResourceURL: resourceURL,
+		FileSize:    fileSize,
+	}, nil
+}
+
+// DownloadFileRequest 下载文件请求
+type DownloadFileRequest struct {
+	UserID     string // 用户ID（用于权限验证，为空时视为系统内部请求，可访问所有资源）
+	ResourceID string // 资源ID
+}
+
+// DownloadFileResult 下载文件结果
+type DownloadFileResult struct {
+	ResourceID  string        `json:"resource_id"`
+	FileName    string        `json:"file_name"`
+	ContentType string        `json:"content_type"`
+	FileSize    int64         `json:"file_size"`
+	Data        io.ReadCloser `json:"-"` // 不序列化到JSON
+}
+
+// DownloadFile 下载文件（返回文件流）
+func (s *resourceService) DownloadFile(ctx context.Context, req *DownloadFileRequest) (*DownloadFileResult, error) {
+	// 查找资源
+	res, err := s.resourceRepo.FindByID(ctx, req.ResourceID)
+	if err != nil {
+		return nil, ErrResourceNotFound
+	}
+
+	// 检查访问权限
+	// 如果 userID 为空，视为系统内部请求，跳过权限检查
+	if req.UserID != "" && res.UserID != req.UserID {
+		return nil, ErrResourceAccessDenied
+	}
+
+	// 检查资源状态
+	if res.Status == resource.ResourceStatusDeleted {
+		return nil, ErrResourceNotFound
+	}
+
+	// 从存储下载文件
+	reader, err := s.storage.Download(ctx, res.StorageKey)
+	if err != nil {
+		log.Error().Err(err).Str("key", res.StorageKey).Msg("failed to download file")
+		return nil, errors.New("下载文件失败")
+	}
+
+	return &DownloadFileResult{
+		ResourceID:  res.ID,
+		FileName:    res.Name,
+		ContentType: res.ContentType,
+		FileSize:    res.FileSize,
+		Data:        reader,
+	}, nil
+}
+
 // ListResourcesRequest 查询资源列表请求
 type ListResourcesRequest struct {
-	UserID   string // 用户ID（必需）
+	UserID   string // 用户ID（为空时视为系统内部请求，可查询所有用户的资源）
 	Ext      string // 文件扩展名筛选（可选）
 	Status   string // 状态筛选（可选）
 	Page     int    // 页码（默认1）
@@ -330,7 +506,7 @@ type ListResourcesResult struct {
 }
 
 // ListResources 查询资源列表
-func (s *ResourceService) ListResources(ctx context.Context, req *ListResourcesRequest) (*ListResourcesResult, error) {
+func (s *resourceService) ListResources(ctx context.Context, req *ListResourcesRequest) (*ListResourcesResult, error) {
 	// 设置默认值
 	if req.Page <= 0 {
 		req.Page = 1
@@ -346,7 +522,19 @@ func (s *ResourceService) ListResources(ctx context.Context, req *ListResourcesR
 	offset := (req.Page - 1) * req.PageSize
 
 	// 查询资源列表
-	resources, total, err := s.resourceRepo.FindByUserID(ctx, req.UserID, req.PageSize, offset)
+	// 如果 userID 为空，视为系统内部请求，查询所有用户的资源
+	var resources []*resource.Resource
+	var total int64
+	var err error
+
+	if req.UserID == "" {
+		// 系统内部请求：查询所有资源
+		resources, total, err = s.resourceRepo.FindAll(ctx, req.PageSize, offset)
+	} else {
+		// 普通用户请求：只查询该用户的资源
+		resources, total, err = s.resourceRepo.FindByUserID(ctx, req.UserID, req.PageSize, offset)
+	}
+
 	if err != nil {
 		log.Error().Err(err).Msg("failed to list resources")
 		return nil, errors.New("查询资源列表失败")
@@ -366,9 +554,6 @@ func (s *ResourceService) ListResources(ctx context.Context, req *ListResourcesR
 		filteredResources = append(filteredResources, res)
 	}
 
-	// 注意：这里简化处理，实际应该在数据库层面进行筛选以提高性能
-	// 当前实现先查询所有数据再筛选，对于大数据量会有性能问题
-
 	return &ListResourcesResult{
 		Resources: filteredResources,
 		Total:     total,
@@ -377,16 +562,28 @@ func (s *ResourceService) ListResources(ctx context.Context, req *ListResourcesR
 	}, nil
 }
 
-// GetResource 获取资源详情
-func (s *ResourceService) GetResource(ctx context.Context, userID string, resourceID string) (*resource.Resource, error) {
+// GetResourceRequest 获取资源元数据请求
+type GetResourceRequest struct {
+	UserID     string // 用户ID（用于权限验证，为空时视为系统内部请求，可访问所有资源）
+	ResourceID string // 资源ID
+}
+
+// GetResourceResult 获取资源元数据结果
+type GetResourceResult struct {
+	Resource *resource.Resource `json:"resource"`
+}
+
+// GetResource 获取资源元数据（不下载文件）
+func (s *resourceService) GetResource(ctx context.Context, req *GetResourceRequest) (*GetResourceResult, error) {
 	// 查找资源
-	res, err := s.resourceRepo.FindByID(ctx, resourceID)
+	res, err := s.resourceRepo.FindByID(ctx, req.ResourceID)
 	if err != nil {
 		return nil, ErrResourceNotFound
 	}
 
-	// 检查访问权限（用户只能访问自己的资源）
-	if res.UserID != userID {
+	// 检查访问权限
+	// 如果 userID 为空，视为系统内部请求，跳过权限检查
+	if req.UserID != "" && res.UserID != req.UserID {
 		return nil, ErrResourceAccessDenied
 	}
 
@@ -395,105 +592,16 @@ func (s *ResourceService) GetResource(ctx context.Context, userID string, resour
 		return nil, ErrResourceNotFound
 	}
 
-	return res, nil
-}
-
-// DeleteResource 删除资源（软删除）
-func (s *ResourceService) DeleteResource(ctx context.Context, userID string, resourceID string) error {
-	// 查找资源
-	res, err := s.resourceRepo.FindByID(ctx, resourceID)
-	if err != nil {
-		return ErrResourceNotFound
-	}
-
-	// 检查访问权限（用户只能删除自己的资源）
-	if res.UserID != userID {
-		return ErrResourceAccessDenied
-	}
-
-	// 执行软删除
-	if err := s.resourceRepo.Delete(ctx, resourceID); err != nil {
-		log.Error().Err(err).Str("resource_id", resourceID).Msg("failed to delete resource")
-		return errors.New("删除资源失败")
-	}
-
-	// 注意：这里只做软删除，不删除实际存储的文件
-	// 如果需要物理删除，可以在这里调用 storage.Delete
-	// 但通常建议保留文件以便恢复，或者通过定时任务清理
-
-	return nil
-}
-
-// UpdateResourceRequest 更新资源请求
-type UpdateResourceRequest struct {
-	DisplayName string                 `json:"display_name,omitempty"`
-	Description string                 `json:"description,omitempty"`
-	Tags        []string               `json:"tags,omitempty"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
-}
-
-// UpdateResource 更新资源信息
-func (s *ResourceService) UpdateResource(ctx context.Context, userID string, resourceID string, req *UpdateResourceRequest) (*resource.Resource, error) {
-	// 查找资源
-	res, err := s.resourceRepo.FindByID(ctx, resourceID)
-	if err != nil {
-		return nil, ErrResourceNotFound
-	}
-
-	// 检查访问权限（用户只能更新自己的资源）
-	if res.UserID != userID {
-		return nil, ErrResourceAccessDenied
-	}
-
-	// 检查资源状态
-	if res.Status == resource.ResourceStatusDeleted {
-		return nil, ErrResourceNotFound
-	}
-
-	// 构建更新数据
-	updates := make(map[string]interface{})
-	if req.DisplayName != "" {
-		updates["display_name"] = req.DisplayName
-	}
-	if req.Description != "" {
-		updates["description"] = req.Description
-	}
-	if req.Tags != nil {
-		updates["tags"] = req.Tags
-	}
-	if req.Metadata != nil {
-		updates["metadata"] = req.Metadata
-	}
-
-	if len(updates) == 0 {
-		return res, nil // 没有需要更新的字段
-	}
-
-	// 更新资源
-	if err := s.resourceRepo.Update(ctx, resourceID, updates); err != nil {
-		log.Error().Err(err).Str("resource_id", resourceID).Msg("failed to update resource")
-		return nil, errors.New("更新资源失败")
-	}
-
-	// 重新查询资源以返回最新数据
-	updatedRes, err := s.resourceRepo.FindByID(ctx, resourceID)
-	if err != nil {
-		log.Error().Err(err).Str("resource_id", resourceID).Msg("failed to get updated resource")
-		return nil, errors.New("获取更新后的资源失败")
-	}
-
-	return updatedRes, nil
+	return &GetResourceResult{
+		Resource: res,
+	}, nil
 }
 
 // generateStorageKey 生成存储路径
 // 格式：resources/{user_id}/{resource_id}.{ext}
-func (s *ResourceService) generateStorageKey(userID, resourceID, ext string) string {
-	// 确保扩展名格式正确（不含点号）
-	ext = strings.TrimPrefix(ext, ".")
-	if ext == "" {
-		ext = "bin" // 默认扩展名
+func (s *resourceService) generateStorageKey(userID, resourceID, ext string) string {
+	if ext != "" {
+		return fmt.Sprintf("resources/%s/%s.%s", userID, resourceID, ext)
 	}
-
-	// 构建路径
-	return fmt.Sprintf("resources/%s/%s.%s", userID, resourceID, ext)
+	return fmt.Sprintf("resources/%s/%s", userID, resourceID)
 }

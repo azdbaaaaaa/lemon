@@ -18,6 +18,19 @@
 - 优先使用组合而非继承
 - 避免深层嵌套，保持代码扁平化
 
+### Function vs Method Design
+- **优先使用结构体方法而非纯函数**
+- 如果函数包含业务逻辑、状态管理或需要扩展性，应该使用结构体方法
+- 纯函数仅适用于：
+  - 简单的工具函数（如 `min(a, b int)`、`max(a, b int)`）
+  - 纯数学计算函数（无副作用、无状态）
+  - 简单的类型转换函数
+- 使用结构体方法的好处：
+  - 更好的封装性：相关功能组织在一起
+  - 易于扩展：可以添加配置、状态等
+  - 更清晰的职责划分：每个结构体负责特定领域的功能
+  - 便于测试：可以 mock 结构体进行单元测试
+
 ### Error Handling
 - 使用明确的错误类型
 - 错误信息应该清晰、可操作
@@ -38,3 +51,205 @@
 - **写完单元测试用例后必须运行测试确保通过**（使用 `go test ./path/to/package -v` 运行）
 - 如果测试失败，必须修复后再提交
 
+- **测试用例例外**：
+  - 在测试用例中可以直接使用 `storage.Upload` 上传文件（简化测试代码）
+  - **但上传完成后必须调用 `ResourceService.CompleteUpload` 创建资源记录**
+  - 这样可以确保测试中的资源也能正确记录到数据库中
+
+- **测试用例中使用 Service 层**：
+  - **测试用例中必须使用 Service 层，禁止直接使用 Repository 层**
+  - 所有数据查询、创建、更新、删除操作都必须通过 Service 层进行
+  - 原因：
+    - 测试应该测试业务逻辑，而不是数据访问层
+    - Service 层封装了业务逻辑，测试 Service 层能更好地验证业务功能
+    - 避免测试代码与实现细节耦合，提高测试的稳定性和可维护性
+    - 保持测试代码与生产代码的一致性：生产代码使用 Service 层，测试代码也应该使用 Service 层
+  - 例外情况：
+    - 仅当测试 Repository 层本身的功能时（如测试数据库操作、索引、查询性能等），可以直接使用 Repository
+    - 测试用例的初始化代码（如 TestMain）可以创建 Repository 实例用于构建 Service，但不应该直接调用 Repository 方法
+
+- **测试用例中的非空判断**：
+  - **测试用例同样遵循 Go 错误处理约定**（见上面的 "Go 错误处理约定" 部分）
+  - 如果 `err == nil`，返回的对象一定不为 nil，测试代码中不需要检查
+  - 如果 `TestMain` 成功执行，初始化好的依赖（如 `LLMProvider`、`TTSProvider` 等）一定不为 nil，不需要检查
+
+### Data Structure Design
+- **优先使用结构体而非 map[string]interface{}**
+- 如果数据结构需要解析，且字段比较确定的，一律使用结构体定义
+- 避免使用 `map[string]interface{}` 存储结构化数据
+- 原因：
+  - 类型安全：编译时检查字段类型，避免运行时错误
+  - 代码清晰：结构体定义明确字段含义和类型
+  - IDE 支持：自动补全、类型提示、重构支持
+  - 易于维护：结构变更时编译器会提示需要更新的地方
+  - 性能更好：避免类型断言和反射的开销
+- 例外情况：
+  - 完全动态的、字段不确定的数据（如用户自定义的元数据）
+  - 临时解析 JSON 但不需要持久化的场景
+  - 需要向后兼容旧格式的过渡期
+
+### Model File Organization
+- **一个文件对应一个数据库表**
+- 保持目录下结构的整体风格一致
+- 与主实体相关的辅助结构体（如内容结构、嵌套结构等）应该放在同一个文件中
+- 例如：`NarrationContent`、`NarrationChapterInfo`、`NarrationCharacter`、`NarrationScene`、`NarrationShot` 等结构体应该与 `Narration` 放在同一个 `narration.go` 文件中
+- 原因：
+  - 保持代码组织的一致性
+  - 便于查找和维护：所有相关的结构体定义集中在一个地方
+  - 减少文件数量，避免过度拆分
+  - 符合 Go 语言的文件组织习惯
+
+### Naming Convention for Model Structures
+- **模块内的辅助结构体应使用模块前缀，避免命名冲突**
+- 如果结构体属于某个模块（如 `narration`），且可能与其他模块的结构体名称冲突，应该加上模块前缀
+- 例如：`narration` 模块中的 `ChapterInfo` 应该命名为 `NarrationChapterInfo`，避免与章节模块的 `ChapterInfo` 冲突
+- 命名规则：
+  - 主实体：直接使用模块名（如 `Narration`）
+  - 内容结构：模块名 + Content（如 `NarrationContent`）
+  - 辅助结构体：模块名 + 结构体名（如 `NarrationChapterInfo`、`NarrationCharacter`、`NarrationScene`、`NarrationShot`）
+- 原因：
+  - 避免跨模块的命名冲突
+  - 提高代码可读性：从名称就能看出结构体属于哪个模块
+  - 便于 IDE 自动补全和代码导航
+  - 减少导入时的混淆
+
+### Service Layer Architecture
+- **Service 层统一采用接口实现方式**
+- 每个 Service 模块都应该：
+  1. 定义公开的接口（如 `NovelService`），定义该模块提供的能力
+  2. 实现私有的结构体（如 `novelService`），实现接口的所有方法
+  3. 构造函数返回接口类型（如 `NewNovelService` 返回 `NovelService`）
+- 接口实现的好处：
+  - 更好的可测试性：可以轻松 mock 接口进行单元测试
+  - 更好的解耦：调用方依赖接口而非具体实现
+  - 更灵活的扩展：可以轻松替换实现或添加装饰器
+  - 符合依赖倒置原则：依赖抽象而非具体实现
+- 示例：
+  ```go
+  // 接口定义
+  type NovelService interface {
+      CreateNovelFromResource(ctx context.Context, resourceID, userID, workflowID string) (string, error)
+      // ... 其他方法
+  }
+  
+  // 私有实现
+  type novelService struct {
+      // ... 字段
+  }
+  
+  // 构造函数返回接口
+  func NewNovelService(...) NovelService {
+      return &novelService{...}
+  }
+  ```
+
+- **跨模块访问必须通过 Service 层，禁止直接使用其他模块的 Repository 层**
+- 每个模块的 Service 层只能使用自己模块的 Repository 层
+- 如果需要访问其他模块的数据或功能，必须通过该模块的 Service 层接口
+- 原因：
+  - 保持模块间的解耦：模块之间通过 Service 接口交互，而不是直接访问数据层
+  - 业务逻辑封装：Service 层封装了业务逻辑和权限控制，直接使用 Repository 会绕过这些逻辑
+  - 便于维护和扩展：修改数据访问逻辑时，只需要修改对应模块的 Service 层
+  - 符合分层架构原则：上层依赖下层，但同层之间通过接口交互
+- 示例：
+  - ✅ 正确：`NovelService` 使用 `ResourceService` 获取资源信息
+  - ❌ 错误：`NovelService` 直接使用 `ResourceRepo` 访问资源数据
+
+### Parameter Validation
+- **不需要检查结构体字段是否为 nil（如 `if s.repo == nil`）**
+- **不需要对函数参数进行 trim 和空值检查（如 `strings.TrimSpace()` 和 `if param == ""`）**
+- 结构体的依赖字段（如 Repository、Service、Provider 等）在初始化时已经确保传入正确的值
+- 函数参数由调用方负责验证，Service 层不需要重复验证
+- 原因：
+  - 减少冗余代码：初始化时已经确保依赖正确，运行时检查是多余的
+  - 提高代码可读性：移除不必要的检查，让代码更简洁
+  - 遵循契约：如果初始化时没有传入必需的依赖，应该在构造函数中处理或使用接口约束
+  - 参数验证应该在调用方（如 Handler 层）进行，Service 层专注于业务逻辑
+- 需要验证的情况：
+  - 从外部获取的数据（如从数据库查询的结果、从 API 获取的数据等）
+  - 业务逻辑处理后的结果（如 LLM 生成的内容、清理后的文本等）
+  - 可选参数（如 `*time.Time`、`*string` 等指针类型）
+- 不需要验证的情况：
+  - 结构体的依赖字段（如 `s.repo`、`s.service`、`s.provider` 等）
+  - 在构造函数中已经初始化的字段
+  - 函数参数（如 `userID`、`resourceID`、`chapterID` 等）- 由调用方负责验证
+
+- **Go 错误处理约定**：
+  - **根据 Go 的约定，如果函数返回 `(T, error)` 且 `err == nil`，那么 `T` 一定不为 nil**
+  - 如果函数返回 `(*T, error)` 且 `err == nil`，那么 `*T` 一定不为 nil（除非函数明确允许返回 nil）
+  - 整个项目都应该遵循这个约定，不需要检查这些"程序能确保有值"的对象是否为 nil
+  - 原因：
+    - 减少冗余代码：如果 `err == nil`，对象一定不为 nil，检查是多余的
+    - 提高代码可读性：移除不必要的检查，让代码更简洁
+    - 遵循 Go 的约定：`err == nil` 意味着操作成功，返回的对象一定有效
+  - 不需要检查的情况：
+    - 如果 `err == nil`，返回的对象（如 `uploadResult`、`resourceResult`、`novelEntity` 等）一定不为 nil
+    - 如果初始化成功，初始化好的依赖（如 `LLMProvider`、`TTSProvider` 等）一定不为 nil
+    - 从数据库查询返回的对象，如果 `err == nil`，对象一定不为 nil
+  - 需要检查的情况：
+    - 可选字段（如 `*time.Time`、`*string` 等指针类型，可能为 nil）
+    - 切片或 map 可能为空（但不需要检查是否为 nil，只需要检查长度）
+    - 从外部 API 获取的数据，可能返回 nil（但通常也会返回错误）
+
+### Layer Architecture and Call Relationships
+- **分层架构调用关系**：
+  ```
+  Handler/API Layer
+      ↓ (调用)
+  Service Layer (业务逻辑层)
+      ↓ (调用)
+  Repository Layer (数据访问层)
+      ↓ (调用)
+  Model Layer (数据模型层)
+  ```
+
+- **各层职责**：
+  - **Handler/API Layer**：处理 HTTP 请求、参数验证、响应格式化
+  - **Service Layer**：业务逻辑、权限控制、数据验证、跨模块协调
+  - **Repository Layer**：数据访问、CRUD 操作、数据库查询
+  - **Model Layer**：数据模型定义、索引管理、集合名称
+
+- **调用规则**：
+  1. **同层之间**：禁止直接调用，必须通过 Service 接口交互
+  2. **跨模块访问**：必须通过目标模块的 Service 层，禁止直接使用其他模块的 Repository
+  3. **测试用例**：必须使用 Service 层，禁止直接使用 Repository 层（除非测试 Repository 本身）
+  4. **Service 层**：只能使用自己模块的 Repository，访问其他模块必须通过该模块的 Service
+
+- **示例**：
+  - ✅ Handler → NovelService → NovelRepo（同模块）
+  - ✅ Handler → NovelService → ResourceService → ResourceRepo（跨模块，通过 Service）
+  - ✅ Test → NovelService → NovelRepo（测试使用 Service）
+  - ❌ Handler → NovelRepo（跳过 Service 层）
+  - ❌ NovelService → ResourceRepo（跨模块直接访问 Repository）
+  - ❌ Test → NovelRepo（测试直接使用 Repository，除非测试 Repository 本身）
+
+### Service Layer File Organization
+- **当 Service 层逻辑复杂时，应该按功能模块拆分到子文件夹**
+- 如果 Service 层包含多个功能模块（如 narration、audio、subtitle 等），应该创建子文件夹并按模块拆分
+- 拆分原则：
+  - 所有相关文件都放在子文件夹中（如 `service/novel/`），所有文件保持包名为 `novel`（与文件夹名一致）
+  - 主文件：结构体定义和构造函数（如 `novel.go`）
+  - 按功能模块拆分：每个功能模块一个文件（如 `chapter.go`、`narration.go`、`audio.go`、`subtitle.go`）
+  - **命名规则：由于文件已经在子文件夹中，文件名不需要加模块前缀（如不需要 `novel_` 前缀）**
+- 文件组织示例：
+  ```
+  internal/service/
+    novel/
+      novel.go      # 结构体定义和构造函数
+      chapter.go    # 小说和章节相关功能（CreateNovelFromResource, SplitNovelIntoChapters, GetNovel, GetChapters）
+      narration.go  # 解说文案相关功能（GenerateNarrationForChapter, GenerateNarrationsForAllChapters, GetNarration）
+      audio.go      # 音频相关功能（GenerateAudiosForNarration, generateSingleAudio）
+      subtitle.go   # 字幕相关功能（预留）
+  ```
+- 导入方式：
+  - 使用别名导入：`novelservice "lemon/internal/service/novel"`
+  - 调用方式：`novelservice.NewNovelService(...)`
+- 原因：
+  - 提高代码可维护性：每个文件职责单一，便于查找和修改
+  - 降低文件复杂度：避免单个文件过大（超过 200-300 行）
+  - 便于团队协作：不同开发者可以同时修改不同模块
+  - 符合单一职责原则：每个文件只负责一个功能模块
+- 何时拆分：
+  - 当 Service 文件超过 300 行时，考虑拆分
+  - 当包含多个独立的功能模块时（如 narration、audio、subtitle）
+  - 当功能模块之间有清晰的边界时

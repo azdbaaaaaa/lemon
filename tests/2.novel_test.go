@@ -38,9 +38,8 @@ func TestNovelService_CreateAndSplit(t *testing.T) {
 			So(novelID, ShouldNotBeEmpty)
 
 			// 验证小说记录存在
-			novelEntity, err := services.NovelRepo.FindByID(ctx, novelID)
+			novelEntity, err := services.NovelService.GetNovel(ctx, novelID)
 			So(err, ShouldBeNil)
-			So(novelEntity, ShouldNotBeNil)
 			So(novelEntity.ResourceID, ShouldEqual, resourceID)
 			So(novelEntity.UserID, ShouldEqual, userID)
 			So(novelEntity.WorkflowID, ShouldEqual, workflowID)
@@ -52,7 +51,7 @@ func TestNovelService_CreateAndSplit(t *testing.T) {
 
 				Convey("验证章节切分结果", func() {
 					// 验证章节已创建
-					chapters, err := services.ChapterRepo.FindByNovelID(ctx, novelID)
+					chapters, err := services.NovelService.GetChapters(ctx, novelID)
 					So(err, ShouldBeNil)
 					So(len(chapters), ShouldBeGreaterThan, 0)
 					So(len(chapters), ShouldBeLessThanOrEqualTo, targetChapters+10) // 允许一些误差

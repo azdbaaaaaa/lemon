@@ -21,6 +21,7 @@ type Audio struct {
 	Duration        float64    `bson:"duration" json:"duration"`                   // 音频时长（秒）
 	Text            string     `bson:"text" json:"text"`                           // 对应的解说文本
 	Timestamps      []CharTime `bson:"timestamps" json:"timestamps"`               // 字符级别的时间戳
+	Prompt          string     `bson:"prompt,omitempty" json:"prompt,omitempty"`   // 生成音频时使用的提示词/参数（TTS参数配置）
 	Status          string     `bson:"status" json:"status"`                       // 状态：pending, completed, failed
 	CreatedAt       time.Time  `bson:"created_at" json:"created_at"`
 	UpdatedAt       time.Time  `bson:"updated_at" json:"updated_at"`

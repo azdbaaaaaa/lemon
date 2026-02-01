@@ -1,0 +1,111 @@
+package novel
+
+import (
+	"context"
+	"fmt"
+	"io"
+
+	"lemon/internal/model/novel"
+	"lemon/internal/pkg/id"
+	"lemon/internal/pkg/noveltools"
+	"lemon/internal/service"
+)
+
+// CreateNovelFromResource 第一步：根据资源ID获取小说内容，然后创建小说
+// 返回创建的小说ID
+func (s *novelService) CreateNovelFromResource(ctx context.Context, resourceID, userID, workflowID string) (string, error) {
+	// 使用 ResourceService 获取资源信息（系统内部请求，userID 为空）
+	_, err := s.resourceService.GetResource(ctx, &service.GetResourceRequest{
+		ResourceID: resourceID,
+		UserID:     "", // 系统内部请求，可以访问所有资源
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to find resource: %w", err)
+	}
+
+	novelID := id.New()
+	novelEntity := &novel.Novel{
+		ID:         novelID,
+		ResourceID: resourceID,
+		UserID:     userID,
+		WorkflowID: workflowID,
+	}
+
+	if err := s.novelRepo.Create(ctx, novelEntity); err != nil {
+		return "", fmt.Errorf("failed to create novel: %w", err)
+	}
+
+	return novelID, nil
+}
+
+// SplitNovelIntoChapters 第二步：根据小说内容切分章节，然后插入章节数据
+// 需要先从资源中读取内容，然后切分并保存章节
+func (s *novelService) SplitNovelIntoChapters(ctx context.Context, novelID string, targetChapters int) error {
+	novelEntity, err := s.novelRepo.FindByID(ctx, novelID)
+	if err != nil {
+		return fmt.Errorf("failed to find novel: %w", err)
+	}
+
+	// 使用 ResourceService 获取资源信息（系统内部请求，userID 为空）
+	resResult, err := s.resourceService.GetResource(ctx, &service.GetResourceRequest{
+		ResourceID: novelEntity.ResourceID,
+		UserID:     "", // 系统内部请求，可以访问所有资源
+	})
+	if err != nil {
+		return fmt.Errorf("failed to find resource: %w", err)
+	}
+	res := resResult.Resource
+
+	// 通过 resource 模块下载文件
+	downloadReq := &service.DownloadFileRequest{
+		UserID:     novelEntity.UserID,
+		ResourceID: res.ID,
+	}
+	downloadResult, err := s.resourceService.DownloadFile(ctx, downloadReq)
+	if err != nil {
+		return fmt.Errorf("failed to download resource: %w", err)
+	}
+	defer downloadResult.Data.Close()
+
+	reader := downloadResult.Data
+
+	content, err := io.ReadAll(reader)
+	if err != nil {
+		return fmt.Errorf("failed to read resource content: %w", err)
+	}
+
+	splitter := noveltools.NewChapterSplitter()
+	segments := splitter.Split(string(content), targetChapters)
+	if len(segments) == 0 {
+		return fmt.Errorf("no chapters split from novel content")
+	}
+
+	for i, seg := range segments {
+		chapterID := id.New()
+		chapterEntity := &novel.Chapter{
+			ID:          chapterID,
+			NovelID:     novelID,
+			WorkflowID:  novelEntity.WorkflowID,
+			UserID:      novelEntity.UserID,
+			Sequence:    i + 1,
+			Title:       seg.Title,
+			ChapterText: seg.Text,
+		}
+
+		if err := s.chapterRepo.Create(ctx, chapterEntity); err != nil {
+			return fmt.Errorf("failed to create chapter %d: %w", i+1, err)
+		}
+	}
+
+	return nil
+}
+
+// GetNovel 获取小说信息
+func (s *novelService) GetNovel(ctx context.Context, novelID string) (*novel.Novel, error) {
+	return s.novelRepo.FindByID(ctx, novelID)
+}
+
+// GetChapters 获取小说的所有章节
+func (s *novelService) GetChapters(ctx context.Context, novelID string) ([]*novel.Chapter, error) {
+	return s.chapterRepo.FindByNovelID(ctx, novelID)
+}

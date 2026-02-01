@@ -80,6 +80,38 @@ func (r *ResourceRepo) FindByUserID(ctx context.Context, userID string, limit, o
 	return resources, total, nil
 }
 
+// FindAll 查询所有资源列表（不限制用户ID，用于系统内部请求）
+func (r *ResourceRepo) FindAll(ctx context.Context, limit, offset int) ([]*resource.Resource, int64, error) {
+	filter := bson.M{
+		"deleted_at": nil,
+	}
+
+	// 查询总数
+	total, err := r.collection.CountDocuments(ctx, filter)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// 查询列表
+	opts := options.Find().
+		SetSort(bson.D{bson.E{Key: "created_at", Value: -1}}).
+		SetLimit(int64(limit)).
+		SetSkip(int64(offset))
+
+	cursor, err := r.collection.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer cursor.Close(ctx)
+
+	var resources []*resource.Resource
+	if err := cursor.All(ctx, &resources); err != nil {
+		return nil, 0, err
+	}
+
+	return resources, total, nil
+}
+
 // FindByMD5 根据MD5查询（去重）
 func (r *ResourceRepo) FindByMD5(ctx context.Context, md5 string) (*resource.Resource, error) {
 	var res resource.Resource

@@ -7,7 +7,6 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
-	"lemon/internal/model/narration"
 	"lemon/internal/model/novel"
 	"lemon/internal/model/resource"
 )
@@ -25,7 +24,7 @@ func EnsureIndexes(db *mongo.Database) error {
 		&resource.UploadSession{},
 		&novel.Novel{},
 		&novel.Chapter{},
-		&narration.Narration{},
+		&novel.Narration{},
 		&novel.Audio{},
 		&novel.Subtitle{},
 	}
