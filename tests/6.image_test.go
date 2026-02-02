@@ -37,7 +37,7 @@ func TestNovelService_GenerateImages(t *testing.T) {
 			So(err, ShouldBeNil)
 			So(len(imageIDs), ShouldBeGreaterThan, 0)
 
-			Convey("验证图片已保存到 scene_shot_images 表", func() {
+			Convey("验证图片已保存到 chapter_images 表", func() {
 				// 验证返回的 imageIDs 不为空
 				So(len(imageIDs), ShouldBeGreaterThan, 0)
 
@@ -45,8 +45,8 @@ func TestNovelService_GenerateImages(t *testing.T) {
 				// 1. 图片文件已上传到 resource 模块
 				// 2. 图片记录已保存到数据库
 				// 3. 每个 NarrationShot 对应一张图片
-				// 注意：目前 NovelService 没有 GetSceneShotImage 方法，所以无法直接验证数据库记录
-				// 如果需要验证，可以添加 GetSceneShotImage 方法到 NovelService 接口
+				// 注意：目前 NovelService 没有 GetChapterImage 方法，所以无法直接验证数据库记录
+				// 如果需要验证，可以添加 GetChapterImage 方法到 NovelService 接口
 			})
 		})
 	})

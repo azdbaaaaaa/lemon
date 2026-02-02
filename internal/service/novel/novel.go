@@ -1,12 +1,10 @@
 package novel
 
 import (
-	"context"
 	"fmt"
 
 	"go.mongodb.org/mongo-driver/mongo"
 
-	"lemon/internal/model/novel"
 	"lemon/internal/pkg/ark"
 	"lemon/internal/pkg/noveltools"
 	"lemon/internal/pkg/noveltools/providers"
@@ -16,62 +14,29 @@ import (
 )
 
 // NovelService 小说服务接口
-// 定义 novel 模块 service 层提供的能力
+// 组合所有子模块的服务接口
 type NovelService interface {
-	// CreateNovelFromResource 根据资源ID创建小说
-	CreateNovelFromResource(ctx context.Context, resourceID, userID, workflowID string) (string, error)
-
-	// SplitNovelIntoChapters 根据小说内容切分章节
-	SplitNovelIntoChapters(ctx context.Context, novelID string, targetChapters int) error
-
-	// GetNovel 获取小说信息
-	GetNovel(ctx context.Context, novelID string) (*novel.Novel, error)
-
-	// GetChapters 获取小说的所有章节
-	GetChapters(ctx context.Context, novelID string) ([]*novel.Chapter, error)
-
-	// GenerateNarrationForChapter 为单一章节生成解说文本
-	GenerateNarrationForChapter(ctx context.Context, chapterID string) (string, error)
-
-	// GenerateNarrationsForAllChapters 并发地为所有章节生成解说文本
-	GenerateNarrationsForAllChapters(ctx context.Context, novelID string) error
-
-	// GetNarration 根据章节ID获取解说文案
-	GetNarration(ctx context.Context, chapterID string) (*novel.Narration, error)
-
-	// GenerateAudiosForNarration 为解说文案生成所有音频片段
-	GenerateAudiosForNarration(ctx context.Context, narrationID string) ([]string, error)
-
-	// GenerateSubtitlesForNarration 为解说文案生成字幕文件（ASS格式）
-	// 需要先有音频记录（包含时间戳数据）
-	GenerateSubtitlesForNarration(ctx context.Context, narrationID string) (string, error)
-
-	// GenerateImagesForNarration 为解说文案生成所有场景特写图片
-	GenerateImagesForNarration(ctx context.Context, narrationID string) ([]string, error)
-
-	// SyncCharactersFromNarration 从解说文案同步角色信息到小说级别
-	SyncCharactersFromNarration(ctx context.Context, novelID, narrationID string) error
-
-	// GetCharactersByNovelID 获取小说的所有角色
-	GetCharactersByNovelID(ctx context.Context, novelID string) ([]*novel.Character, error)
-
-	// GetCharacterByName 根据名称获取角色
-	GetCharacterByName(ctx context.Context, novelID, name string) (*novel.Character, error)
+	ChapterService
+	NarrationService
+	AudioService
+	SubtitleService
+	ImageService
+	CharacterService
 }
 
 // novelService 小说服务实现
 type novelService struct {
-	resourceService    service.ResourceService
-	novelRepo          novelrepo.NovelRepository
-	chapterRepo        novelrepo.ChapterRepository
-	narrationRepo      novelrepo.NarrationRepository
-	audioRepo          novelrepo.AudioRepository
-	subtitleRepo       novelrepo.SubtitleRepository
-	characterRepo      novelrepo.CharacterRepository
-	sceneShotImageRepo novelrepo.SceneShotImageRepository
-	llmProvider        noveltools.LLMProvider
-	ttsProvider        noveltools.TTSProvider
-	imageProvider      noveltools.ImageProvider
+	resourceService  service.ResourceService
+	novelRepo        novelrepo.NovelRepository
+	chapterRepo      novelrepo.ChapterRepository
+	narrationRepo    novelrepo.ChapterNarrationRepository
+	audioRepo        novelrepo.ChapterAudioRepository
+	subtitleRepo     novelrepo.ChapterSubtitleRepository
+	characterRepo    novelrepo.CharacterRepository
+	chapterImageRepo novelrepo.ChapterImageRepository
+	llmProvider      noveltools.LLMProvider
+	ttsProvider      noveltools.TTSProvider
+	imageProvider    noveltools.ImageProvider
 }
 
 // NewNovelService 创建小说服务
@@ -83,11 +48,11 @@ func NewNovelService(
 	// 初始化所有 repository
 	novelRepo := novelrepo.NewNovelRepo(db)
 	chapterRepo := novelrepo.NewChapterRepo(db)
-	narrationRepo := novelrepo.NewNarrationRepo(db)
-	audioRepo := novelrepo.NewAudioRepo(db)
-	subtitleRepo := novelrepo.NewSubtitleRepo(db)
+	narrationRepo := novelrepo.NewChapterNarrationRepo(db)
+	audioRepo := novelrepo.NewChapterAudioRepo(db)
+	subtitleRepo := novelrepo.NewChapterSubtitleRepo(db)
 	characterRepo := novelrepo.NewCharacterRepo(db)
-	sceneShotImageRepo := novelrepo.NewSceneShotImageRepo(db)
+	chapterImageRepo := novelrepo.NewChapterImageRepo(db)
 
 	// 初始化 LLM Provider（从环境变量读取配置）
 	aiCfg := ark.ArkConfigFromEnv()
@@ -113,16 +78,16 @@ func NewNovelService(
 	}
 
 	return &novelService{
-		resourceService:    resourceService,
-		novelRepo:          novelRepo,
-		chapterRepo:        chapterRepo,
-		narrationRepo:      narrationRepo,
-		audioRepo:          audioRepo,
-		subtitleRepo:       subtitleRepo,
-		characterRepo:      characterRepo,
-		sceneShotImageRepo: sceneShotImageRepo,
-		llmProvider:        llmProvider,
-		ttsProvider:        ttsProvider,
-		imageProvider:      imageProvider,
+		resourceService:  resourceService,
+		novelRepo:        novelRepo,
+		chapterRepo:      chapterRepo,
+		narrationRepo:    narrationRepo,
+		audioRepo:        audioRepo,
+		subtitleRepo:     subtitleRepo,
+		characterRepo:    characterRepo,
+		chapterImageRepo: chapterImageRepo,
+		llmProvider:      llmProvider,
+		ttsProvider:      ttsProvider,
+		imageProvider:    imageProvider,
 	}, nil
 }

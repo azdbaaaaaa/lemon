@@ -10,11 +10,24 @@ import (
 	"lemon/internal/pkg/id"
 )
 
-// SyncCharactersFromNarration 从解说文案同步角色信息到小说级别
+// CharacterService 角色服务接口
+// 定义角色相关的能力
+type CharacterService interface {
+	// SyncCharactersFromNarration 从章节解说同步角色信息到小说级别
+	SyncCharactersFromNarration(ctx context.Context, novelID, narrationID string) error
+
+	// GetCharactersByNovelID 获取小说的所有角色
+	GetCharactersByNovelID(ctx context.Context, novelID string) ([]*novel.Character, error)
+
+	// GetCharacterByName 根据名称获取角色
+	GetCharacterByName(ctx context.Context, novelID, name string) (*novel.Character, error)
+}
+
+// SyncCharactersFromNarration 从章节解说同步角色信息到小说级别
 func (s *novelService) SyncCharactersFromNarration(ctx context.Context, novelID, narrationID string) error {
 	narration, err := s.narrationRepo.FindByID(ctx, narrationID)
 	if err != nil {
-		return fmt.Errorf("find narration: %w", err)
+		return fmt.Errorf("find chapter narration: %w", err)
 	}
 
 	if narration.Content == nil || narration.Content.Characters == nil {

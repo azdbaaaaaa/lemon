@@ -96,15 +96,15 @@ func TestMain(m *testing.M) {
 			// 清理数据库集合（按顺序删除，避免依赖问题）
 			// 注意：删除集合不会删除数据库本身，但如果所有集合都被删除，MongoDB 可能会在下次访问时自动删除空数据库
 			collections := []string{
-				"scene_shot_images", // 先删除图片
-				"subtitles",         // 删除字幕
-				"audios",            // 删除音频
-				"characters",        // 删除角色
-				"narrations",        // 删除解说文案
-				"chapters",          // 删除章节
-				"novels",            // 删除小说
-				"upload_sessions",   // 删除上传会话
-				"resources",         // 最后删除资源
+				"chapter_images",     // 先删除图片
+				"chapter_subtitles",  // 删除章节字幕
+				"chapter_audios",     // 删除章节音频
+				"characters",         // 删除角色
+				"chapter_narrations", // 删除章节解说
+				"chapters",           // 删除章节
+				"novels",             // 删除小说
+				"upload_sessions",    // 删除上传会话
+				"resources",          // 最后删除资源
 			}
 			for _, collName := range collections {
 				if err := testDB.Collection(collName).Drop(testCtx); err != nil {
@@ -235,9 +235,9 @@ func setupTestEnvironment(t *testing.T) (context.Context, *mongo.Database, stora
 		if !keepTestData {
 			// 清理数据库集合（按顺序删除，避免依赖问题）
 			collections := []string{
-				"subtitles",
-				"audios",
-				"narrations",
+				"chapter_subtitles",
+				"chapter_audios",
+				"chapter_narrations",
 				"chapters",
 				"novels",
 				"upload_sessions",
@@ -362,9 +362,9 @@ func findOrCreateTestChapters(ctx context.Context, t *testing.T, services *TestS
 	return novelID, chapters
 }
 
-// findOrCreateTestNarration 查找或创建测试解说文案
-// 优先使用数据库中已有的解说文案（从已有的章节中查找）
-func findOrCreateTestNarration(ctx context.Context, t *testing.T, services *TestServices, userID string) (string, *novel.Narration) {
+// findOrCreateTestNarration 查找或创建测试章节解说
+// 优先使用数据库中已有的章节解说（从已有的章节中查找）
+func findOrCreateTestNarration(ctx context.Context, t *testing.T, services *TestServices, userID string) (string, *novel.ChapterNarration) {
 	// 1. 先尝试查找已有的章节
 	_, chapters := findOrCreateTestChapters(ctx, t, services, userID)
 	if len(chapters) == 0 {

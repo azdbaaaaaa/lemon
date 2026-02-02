@@ -15,18 +15,30 @@ import (
 	"lemon/internal/service"
 )
 
-// GenerateAudiosForNarration 为解说文案生成所有音频片段
+// AudioService 章节音频服务接口
+// 定义章节音频相关的能力
+type AudioService interface {
+	// GenerateAudiosForNarration 为章节解说生成所有章节音频片段
+	// 自动使用最新的版本号+1
+	GenerateAudiosForNarration(ctx context.Context, narrationID string) ([]string, error)
+
+	// GetAudioVersions 获取章节解说的所有音频版本号
+	GetAudioVersions(ctx context.Context, narrationID string) ([]int, error)
+}
+
+// GenerateAudiosForNarration 为章节解说生成所有章节音频片段
 // 参考 Python 的 gen_audio.py 逻辑
 //
 // Args:
 //   - ctx: 上下文
-//   - narrationID: 解说文案ID
+//   - narrationID: 章节解说ID
+//   - version: 音频版本号，如果为空则使用章节解说的版本号，如果指定则自动生成下一个版本号
 //
 // Returns:
-//   - []string: 生成的音频ID列表
+//   - []string: 生成的章节音频ID列表
 //   - error: 错误信息
 func (s *novelService) GenerateAudiosForNarration(ctx context.Context, narrationID string) ([]string, error) {
-	// 1. 从数据库获取解说文案
+	// 1. 从数据库获取章节解说
 	narration, err := s.narrationRepo.FindByID(ctx, narrationID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find narration: %w", err)
@@ -34,6 +46,12 @@ func (s *novelService) GenerateAudiosForNarration(ctx context.Context, narration
 
 	if narration.Content == nil {
 		return nil, fmt.Errorf("narration content is nil")
+	}
+
+	// 2. 自动生成下一个版本号（基于章节ID，独立递增）
+	audioVersion, err := s.getNextAudioVersion(ctx, narration.ChapterID, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get next audio version: %w", err)
 	}
 
 	// 2. 从 JSON content 中提取所有解说文本
@@ -47,7 +65,7 @@ func (s *novelService) GenerateAudiosForNarration(ctx context.Context, narration
 		return nil, fmt.Errorf("no narration texts found")
 	}
 
-	// 3. 为每段解说文本生成音频
+	// 3. 为每段解说文本生成章节音频
 	textCleaner := noveltools.NewTextCleaner()
 	var audioIDs []string
 	for i, narrationText := range narrationTexts {
@@ -60,10 +78,10 @@ func (s *novelService) GenerateAudiosForNarration(ctx context.Context, narration
 			continue
 		}
 
-		// 生成音频
-		audioID, err := s.generateSingleAudio(ctx, narration, sequence, cleanText)
+		// 生成章节音频
+		audioID, err := s.generateSingleAudio(ctx, narration, sequence, cleanText, audioVersion)
 		if err != nil {
-			log.Error().Err(err).Int("sequence", sequence).Msg("生成音频失败")
+			log.Error().Err(err).Int("sequence", sequence).Msg("生成章节音频失败")
 			return nil, fmt.Errorf("failed to generate audio for sequence %d: %w", sequence, err)
 		}
 
@@ -73,12 +91,13 @@ func (s *novelService) GenerateAudiosForNarration(ctx context.Context, narration
 	return audioIDs, nil
 }
 
-// generateSingleAudio 生成单个音频片段
+// generateSingleAudio 生成单个章节音频片段
 func (s *novelService) generateSingleAudio(
 	ctx context.Context,
-	narration *novel.Narration,
+	narration *novel.ChapterNarration,
 	sequence int,
 	text string,
+	version int,
 ) (string, error) {
 	// 1. 创建临时文件用于保存音频
 	tmpDir := os.TempDir()
@@ -143,9 +162,9 @@ func (s *novelService) generateSingleAudio(
 		})
 	}
 
-	// 7. 创建 audio 记录
+	// 7. 创建 chapter_audio 记录
 	audioID := id.New()
-	audioEntity := &novel.Audio{
+	audioEntity := &novel.ChapterAudio{
 		ID:              audioID,
 		NarrationID:     narration.ID,
 		ChapterID:       narration.ChapterID,
@@ -156,6 +175,7 @@ func (s *novelService) generateSingleAudio(
 		Text:            text,
 		Timestamps:      charTimes,
 		Prompt:          ttsPrompt,
+		Version:         version, // 使用指定的版本号
 		Status:          "completed",
 	}
 
@@ -164,4 +184,53 @@ func (s *novelService) generateSingleAudio(
 	}
 
 	return audioID, nil
+}
+
+// getNextAudioVersion 获取章节的下一个音频版本号（自动递增）
+// chapterID: 章节ID
+// baseVersion: 基础版本号（如 1），如果为0则自动生成下一个版本号
+func (s *novelService) getNextAudioVersion(ctx context.Context, chapterID string, baseVersion int) (int, error) {
+	versions, err := s.audioRepo.FindVersionsByChapterID(ctx, chapterID)
+	if err != nil {
+		// 如果没有找到任何版本，返回 1 或基础版本号
+		if baseVersion == 0 {
+			return 1, nil
+		}
+		return baseVersion, nil
+	}
+
+	if len(versions) == 0 {
+		if baseVersion == 0 {
+			return 1, nil
+		}
+		return baseVersion, nil
+	}
+
+	// 如果指定了基础版本号，检查该版本是否已存在
+	if baseVersion > 0 {
+		for _, v := range versions {
+			if v == baseVersion {
+				// 该版本已存在，返回下一个版本号
+				maxVersion := 0
+				for _, v := range versions {
+					if v > maxVersion {
+						maxVersion = v
+					}
+				}
+				return maxVersion + 1, nil
+			}
+		}
+		// 该版本不存在，直接返回
+		return baseVersion, nil
+	}
+
+	// 如果没有指定基础版本号，查找所有版本号中的最大值
+	maxVersion := 0
+	for _, v := range versions {
+		if v > maxVersion {
+			maxVersion = v
+		}
+	}
+
+	return maxVersion + 1, nil
 }

@@ -11,6 +11,22 @@ import (
 	"lemon/internal/service"
 )
 
+// ChapterService 章节服务接口
+// 定义小说和章节相关的能力
+type ChapterService interface {
+	// CreateNovelFromResource 根据资源ID创建小说
+	CreateNovelFromResource(ctx context.Context, resourceID, userID, workflowID string) (string, error)
+
+	// SplitNovelIntoChapters 根据小说内容切分章节
+	SplitNovelIntoChapters(ctx context.Context, novelID string, targetChapters int) error
+
+	// GetNovel 获取小说信息
+	GetNovel(ctx context.Context, novelID string) (*novel.Novel, error)
+
+	// GetChapters 获取小说的所有章节
+	GetChapters(ctx context.Context, novelID string) ([]*novel.Chapter, error)
+}
+
 // CreateNovelFromResource 第一步：根据资源ID获取小说内容，然后创建小说
 // 返回创建的小说ID
 func (s *novelService) CreateNovelFromResource(ctx context.Context, resourceID, userID, workflowID string) (string, error) {

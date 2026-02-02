@@ -24,11 +24,11 @@ func EnsureIndexes(db *mongo.Database) error {
 		&resource.UploadSession{},
 		&novel.Novel{},
 		&novel.Chapter{},
-		&novel.Narration{},
-		&novel.Audio{},
-		&novel.Subtitle{},
+		&novel.ChapterNarration{},
+		&novel.ChapterAudio{},
+		&novel.ChapterSubtitle{},
 		&novel.Character{},
-		&novel.SceneShotImage{},
+		&novel.ChapterImage{},
 	}
 
 	// 为实现了 Model 接口的模型创建索引

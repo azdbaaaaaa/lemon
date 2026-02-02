@@ -13,9 +13,21 @@ import (
 	"lemon/internal/service"
 )
 
-// GenerateImagesForNarration 为解说文案生成所有场景特写图片
+// ImageService 章节图片服务接口
+// 定义章节图片相关的能力
+type ImageService interface {
+	// GenerateImagesForNarration 为章节解说生成所有章节图片
+	// 自动使用最新的版本号+1
+	GenerateImagesForNarration(ctx context.Context, narrationID string) ([]string, error)
+
+	// GetImageVersions 获取章节的所有图片版本号
+	GetImageVersions(ctx context.Context, chapterID string) ([]int, error)
+}
+
+// GenerateImagesForNarration 为章节解说生成所有章节图片
+// version: 图片版本号，如果为空则自动生成下一个版本号（基于该章节已有的图片版本），如果指定则自动生成下一个版本号
 func (s *novelService) GenerateImagesForNarration(ctx context.Context, narrationID string) ([]string, error) {
-	// 1. 获取解说文案
+	// 1. 获取章节解说
 	narration, err := s.narrationRepo.FindByID(ctx, narrationID)
 	if err != nil {
 		return nil, fmt.Errorf("find narration: %w", err)
@@ -23,6 +35,12 @@ func (s *novelService) GenerateImagesForNarration(ctx context.Context, narration
 
 	if narration.Content == nil {
 		return nil, fmt.Errorf("narration content is nil")
+	}
+
+	// 2. 自动生成下一个版本号（基于章节ID，独立递增）
+	imageVersion, err := s.getNextImageVersion(ctx, narration.ChapterID, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get next image version: %w", err)
 	}
 
 	// 2. 获取章节信息
@@ -72,7 +90,7 @@ func (s *novelService) GenerateImagesForNarration(ctx context.Context, narration
 			}
 
 			// 生成单张图片
-			imageID, err := s.generateSingleSceneShotImage(
+			imageID, err := s.generateSingleChapterImage(
 				ctx,
 				narration,
 				chapter,
@@ -82,6 +100,7 @@ func (s *novelService) GenerateImagesForNarration(ctx context.Context, narration
 				imageProvider,
 				promptBuilder,
 				sequence,
+				imageVersion,
 			)
 			if err != nil {
 				log.Error().
@@ -100,10 +119,10 @@ func (s *novelService) GenerateImagesForNarration(ctx context.Context, narration
 	return imageIDs, nil
 }
 
-// generateSingleSceneShotImage 生成单张场景特写图片（私有方法）
-func (s *novelService) generateSingleSceneShotImage(
+// generateSingleChapterImage 生成单张章节图片（私有方法）
+func (s *novelService) generateSingleChapterImage(
 	ctx context.Context,
-	narration *novel.Narration,
+	narration *novel.ChapterNarration,
 	chapter *novel.Chapter,
 	scene *novel.NarrationScene,
 	shot *novel.NarrationShot,
@@ -111,6 +130,7 @@ func (s *novelService) generateSingleSceneShotImage(
 	imageProvider noveltools.ImageProvider,
 	promptBuilder *noveltools.ImagePromptBuilder,
 	sequence int,
+	version int,
 ) (string, error) {
 	// 1. 构建完整 prompt
 	completePrompt := promptBuilder.BuildCompletePrompt(character, shot.ScenePrompt)
@@ -138,9 +158,9 @@ func (s *novelService) generateSingleSceneShotImage(
 		return "", fmt.Errorf("upload image: %w", err)
 	}
 
-	// 9. 保存 SceneShotImage 记录
+	// 9. 保存 ChapterImage 记录
 	imageID := id.New()
-	sceneShotImage := &novel.SceneShotImage{
+	chapterImage := &novel.ChapterImage{
 		ID:              imageID,
 		ChapterID:       chapter.ID,
 		NarrationID:     narration.ID,
@@ -149,12 +169,13 @@ func (s *novelService) generateSingleSceneShotImage(
 		ImageResourceID: uploadResult.ResourceID,
 		CharacterName:   shot.Character,
 		Prompt:          completePrompt,
+		Version:         version, // 使用指定的版本号
 		Status:          "completed",
 		Sequence:        sequence,
 	}
 
-	if err := s.sceneShotImageRepo.Create(ctx, sceneShotImage); err != nil {
-		return "", fmt.Errorf("create scene shot image: %w", err)
+	if err := s.chapterImageRepo.Create(ctx, chapterImage); err != nil {
+		return "", fmt.Errorf("create chapter image: %w", err)
 	}
 
 	log.Info().
@@ -162,7 +183,56 @@ func (s *novelService) generateSingleSceneShotImage(
 		Str("chapter_id", chapter.ID).
 		Str("scene", scene.SceneNumber).
 		Str("shot", shot.CloseupNumber).
-		Msg("场景特写图片生成成功")
+		Msg("章节图片生成成功")
 
 	return imageID, nil
+}
+
+// getNextImageVersion 获取章节的下一个图片版本号（自动递增）
+// chapterID: 章节ID
+// baseVersion: 基础版本号（如 1），如果为0则自动生成下一个版本号
+func (s *novelService) getNextImageVersion(ctx context.Context, chapterID string, baseVersion int) (int, error) {
+	versions, err := s.chapterImageRepo.FindVersionsByChapterID(ctx, chapterID)
+	if err != nil {
+		// 如果没有找到任何版本，返回 1 或基础版本号
+		if baseVersion == 0 {
+			return 1, nil
+		}
+		return baseVersion, nil
+	}
+
+	if len(versions) == 0 {
+		if baseVersion == 0 {
+			return 1, nil
+		}
+		return baseVersion, nil
+	}
+
+	// 如果指定了基础版本号，检查该版本是否已存在
+	if baseVersion > 0 {
+		for _, v := range versions {
+			if v == baseVersion {
+				// 该版本已存在，返回下一个版本号
+				maxVersion := 0
+				for _, v := range versions {
+					if v > maxVersion {
+						maxVersion = v
+					}
+				}
+				return maxVersion + 1, nil
+			}
+		}
+		// 该版本不存在，直接返回
+		return baseVersion, nil
+	}
+
+	// 如果没有指定基础版本号，查找所有版本号中的最大值
+	maxVersion := 0
+	for _, v := range versions {
+		if v > maxVersion {
+			maxVersion = v
+		}
+	}
+
+	return maxVersion + 1, nil
 }
