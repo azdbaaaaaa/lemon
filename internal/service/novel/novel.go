@@ -22,6 +22,7 @@ type NovelService interface {
 	SubtitleService
 	ImageService
 	CharacterService
+	VideoService
 }
 
 // novelService 小说服务实现
@@ -34,6 +35,7 @@ type novelService struct {
 	subtitleRepo     novelrepo.ChapterSubtitleRepository
 	characterRepo    novelrepo.CharacterRepository
 	chapterImageRepo novelrepo.ChapterImageRepository
+	videoRepo        novelrepo.ChapterVideoRepository
 	llmProvider      noveltools.LLMProvider
 	ttsProvider      noveltools.TTSProvider
 	imageProvider    noveltools.ImageProvider
@@ -53,6 +55,7 @@ func NewNovelService(
 	subtitleRepo := novelrepo.NewChapterSubtitleRepo(db)
 	characterRepo := novelrepo.NewCharacterRepo(db)
 	chapterImageRepo := novelrepo.NewChapterImageRepo(db)
+	videoRepo := novelrepo.NewChapterVideoRepo(db)
 
 	// 初始化 LLM Provider（从环境变量读取配置）
 	aiCfg := ark.ArkConfigFromEnv()
@@ -86,6 +89,7 @@ func NewNovelService(
 		subtitleRepo:     subtitleRepo,
 		characterRepo:    characterRepo,
 		chapterImageRepo: chapterImageRepo,
+		videoRepo:        videoRepo,
 		llmProvider:      llmProvider,
 		ttsProvider:      ttsProvider,
 		imageProvider:    imageProvider,

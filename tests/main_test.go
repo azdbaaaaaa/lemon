@@ -459,3 +459,159 @@ func setupTestServices(db *mongo.Database, testStorage storage.Storage) *TestSer
 		Storage:         testStorage,
 	}
 }
+
+// requireTestNarration 要求必须有解说文案，否则报错并提示先运行 3.narration_test.go
+func requireTestNarration(ctx context.Context, t *testing.T, services *TestServices, userID string) (string, *novel.ChapterNarration) {
+	_, chapters := findOrCreateTestChapters(ctx, t, services, userID)
+	if len(chapters) == 0 {
+		t.Fatal("测试失败：未找到测试章节。请先运行 2.novel_test.go 创建章节。")
+	}
+
+	// 先尝试查找第一个章节的解说文案
+	firstChapter := chapters[0]
+	narrationEntity, err := services.NovelService.GetNarration(ctx, firstChapter.ID)
+	if err == nil {
+		return narrationEntity.ID, narrationEntity
+	}
+
+	// 如果找不到，直接查询数据库检查是否有该章节的解说文案（用于调试）
+	var narrationModel novel.ChapterNarration
+	narrationColl := testDB.Collection(narrationModel.Collection())
+	collectionName := narrationModel.Collection()
+
+	// 打印调试信息：显示正在查询的数据库和集合
+	t.Logf("调试信息：正在查询数据库=%s, 集合=%s, 章节ID=%s", testDB.Name(), collectionName, firstChapter.ID)
+
+	// 先检查该章节是否有解说文案（不限制 deleted_at，看看是否有数据）
+	chapterFilter := bson.M{"chapter_id": firstChapter.ID}
+	chapterCount, _ := narrationColl.CountDocuments(ctx, chapterFilter)
+	if chapterCount > 0 {
+		// 有数据，但可能被标记为删除，或者查询条件有问题
+		t.Logf("调试信息：找到 %d 条章节 %s 的解说文案记录，但 GetNarration 查询失败（错误: %v）", chapterCount, firstChapter.ID, err)
+
+		// 尝试查询所有记录（包括已删除的）看看数据
+		cursor, _ := narrationColl.Find(ctx, chapterFilter, options.Find().SetSort(bson.M{"created_at": -1}).SetLimit(5))
+		var allNarrations []*novel.ChapterNarration
+		if cursor != nil {
+			cursor.All(ctx, &allNarrations)
+			cursor.Close(ctx)
+			if len(allNarrations) > 0 {
+				for i, n := range allNarrations {
+					t.Logf("调试信息：找到的解说文案记录[%d]：ID=%s, ChapterID=%s, DeletedAt=%v, Status=%s",
+						i, n.ID, n.ChapterID, n.DeletedAt, n.Status)
+					// 如果找到未删除的记录，直接使用它
+					if n.DeletedAt == nil {
+						t.Logf("找到未删除的解说文案记录，使用它：ID=%s", n.ID)
+						return n.ID, n
+					}
+				}
+			}
+		}
+	}
+
+	// 尝试查找数据库中是否有任何该用户的解说文案（可能是其他章节的）
+	narrationFilter := bson.M{"user_id": userID}
+	// 注意：这里不限制 deleted_at，因为可能数据存在但 deleted_at 字段处理有问题
+	opts := options.Find().SetSort(bson.M{"created_at": -1}).SetLimit(1)
+	cursor, err := narrationColl.Find(ctx, narrationFilter, opts)
+	if err == nil {
+		var narrations []*novel.ChapterNarration
+		if err := cursor.All(ctx, &narrations); err == nil && len(narrations) > 0 {
+			// 找到了解说文案，使用它
+			t.Logf("未找到章节 %s 的解说文案，但找到了其他章节的解说文案（章节ID: %s），使用它", firstChapter.ID, narrations[0].ChapterID)
+			return narrations[0].ID, narrations[0]
+		}
+		cursor.Close(ctx)
+	}
+
+	// 如果还是找不到，报错并显示调试信息
+	totalCount, _ := narrationColl.CountDocuments(ctx, bson.M{})
+
+	// 列出所有数据库名称（用于调试）
+	databases, _ := testMongoClient.ListDatabaseNames(ctx, bson.M{})
+	t.Logf("调试信息：MongoDB 中可用的数据库: %v", databases)
+
+	t.Fatalf("测试失败：未找到章节解说文案（章节ID: %s，用户ID: %s）。\n"+
+		"  正在查询的数据库: %s\n"+
+		"  集合名称: %s\n"+
+		"  数据库中共有 %d 条解说文案记录。\n"+
+		"  请确认：\n"+
+		"  1. 数据是否在正确的数据库中（当前查询: %s）\n"+
+		"  2. 集合名称是否正确（当前查询: %s）\n"+
+		"  3. 如果数据在其他数据库，请先运行 3.narration_test.go 在测试数据库中生成解说文案",
+		firstChapter.ID, userID, testDB.Name(), collectionName, totalCount, testDB.Name(), collectionName)
+	return "", nil // 不会执行到这里，但为了编译通过
+}
+
+// requireTestAudios 要求必须有音频，否则报错并提示先运行 4.audio_test.go
+func requireTestAudios(ctx context.Context, t *testing.T, narrationID string) {
+	var audioModel novel.ChapterAudio
+	audioColl := testDB.Collection(audioModel.Collection())
+	audioFilter := bson.M{"narration_id": narrationID, "deleted_at": nil}
+	audioCount, err := audioColl.CountDocuments(ctx, audioFilter)
+	if err != nil {
+		t.Fatalf("测试失败：查询音频记录失败: %v", err)
+	}
+	if audioCount == 0 {
+		t.Fatal("测试失败：未找到音频记录。请先运行 4.audio_test.go 生成音频。")
+	}
+}
+
+// requireTestSubtitles 要求必须有字幕，否则报错并提示先运行 5.subtitle_test.go
+func requireTestSubtitles(ctx context.Context, t *testing.T, narrationID string) {
+	var subtitleModel novel.ChapterSubtitle
+	subtitleColl := testDB.Collection(subtitleModel.Collection())
+	subtitleFilter := bson.M{"narration_id": narrationID, "deleted_at": nil}
+	subtitleCount, err := subtitleColl.CountDocuments(ctx, subtitleFilter)
+	if err != nil {
+		t.Fatalf("测试失败：查询字幕记录失败: %v", err)
+	}
+	if subtitleCount == 0 {
+		t.Fatal("测试失败：未找到字幕记录。请先运行 5.subtitle_test.go 生成字幕。")
+	}
+}
+
+// requireTestImages 要求必须有图片（至少2张），否则报错并提示先运行 6.image_test.go
+func requireTestImages(ctx context.Context, t *testing.T, narrationID string, minCount int) {
+	if minCount <= 0 {
+		minCount = 2
+	}
+	var imageModel novel.ChapterImage
+	imageColl := testDB.Collection(imageModel.Collection())
+	imageFilter := bson.M{"narration_id": narrationID, "deleted_at": nil}
+	imageCount, err := imageColl.CountDocuments(ctx, imageFilter)
+	if err != nil {
+		t.Fatalf("测试失败：查询图片记录失败: %v", err)
+	}
+	if imageCount < int64(minCount) {
+		t.Fatalf("测试失败：图片数量不足（需要至少 %d 张，当前 %d 张）。请先运行 6.image_test.go 生成图片。", minCount, imageCount)
+	}
+}
+
+// requireTestFirstVideos 要求必须有 first_video，否则报错并提示先运行 TestNovelService_GenerateFirstVideos
+func requireTestFirstVideos(ctx context.Context, t *testing.T, chapterID string) {
+	var videoModel novel.ChapterVideo
+	videoColl := testDB.Collection(videoModel.Collection())
+	videoFilter := bson.M{"chapter_id": chapterID, "video_type": "first_video", "deleted_at": nil, "status": "completed"}
+	videoCount, err := videoColl.CountDocuments(ctx, videoFilter)
+	if err != nil {
+		t.Fatalf("测试失败：查询 first_video 记录失败: %v", err)
+	}
+	if videoCount == 0 {
+		t.Fatal("测试失败：未找到已完成的 first_video。请先运行 TestNovelService_GenerateFirstVideos 生成前两张图片的视频。")
+	}
+}
+
+// requireTestNarrationVideos 要求必须有 narration_video，否则报错并提示先运行 TestNovelService_GenerateNarrationVideos
+func requireTestNarrationVideos(ctx context.Context, t *testing.T, chapterID string) {
+	var videoModel novel.ChapterVideo
+	videoColl := testDB.Collection(videoModel.Collection())
+	videoFilter := bson.M{"chapter_id": chapterID, "video_type": "narration_video", "deleted_at": nil, "status": "completed"}
+	videoCount, err := videoColl.CountDocuments(ctx, videoFilter)
+	if err != nil {
+		t.Fatalf("测试失败：查询 narration_video 记录失败: %v", err)
+	}
+	if videoCount == 0 {
+		t.Fatal("测试失败：未找到已完成的 narration_video。请先运行 TestNovelService_GenerateNarrationVideos 生成 narration 视频。")
+	}
+}

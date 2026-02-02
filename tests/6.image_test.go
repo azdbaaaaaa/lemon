@@ -27,8 +27,8 @@ func TestNovelService_GenerateImages(t *testing.T) {
 
 		userID := "test_user_novel_001"
 
-		// 步骤1: 查找或创建测试解说文案（优先使用数据库中已有的）
-		narrationID, _ := findOrCreateTestNarration(ctx, t, services, userID)
+		// 步骤1: 要求必须有测试解说文案，否则报错
+		narrationID, _ := requireTestNarration(ctx, t, services, userID)
 		So(narrationID, ShouldNotBeEmpty)
 
 		Convey("步骤2: 为解说文案生成场景特写图片", func() {

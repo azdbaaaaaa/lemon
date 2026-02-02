@@ -27,15 +27,12 @@ func TestNovelService_GenerateSubtitle(t *testing.T) {
 
 		userID := "test_user_novel_001"
 
-		// 步骤1: 查找或创建测试解说文案和音频（优先使用数据库中已有的）
-		narrationID, _ := findOrCreateTestNarration(ctx, t, services, userID)
+		// 步骤1: 要求必须有测试解说文案，否则报错
+		narrationID, _ := requireTestNarration(ctx, t, services, userID)
 		So(narrationID, ShouldNotBeEmpty)
 
-		// 步骤2: 确保有音频记录（如果没有，先生成音频）
-		// 如果 TestMain 成功执行，TTSProvider 一定已初始化
-		audioIDs, err := services.NovelService.GenerateAudiosForNarration(ctx, narrationID)
-		So(err, ShouldBeNil)
-		So(len(audioIDs), ShouldBeGreaterThan, 0)
+		// 步骤2: 要求必须有音频记录，否则报错
+		requireTestAudios(ctx, t, narrationID)
 
 		Convey("步骤3: 为解说文案生成字幕", func() {
 			// 为解说文案生成字幕文件（ASS格式）

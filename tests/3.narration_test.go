@@ -20,8 +20,8 @@ import (
 	. "github.com/smartystreets/goconvey/convey"
 )
 
-// TestNovelService_GenerateNarration 测试根据章节生成解说文案
-func TestNovelService_GenerateNarration(t *testing.T) {
+// TestNovelService_GenerateNarrationText 测试根据章节生成解说文案
+func TestNovelService_GenerateNarrationText(t *testing.T) {
 	Convey("NovelService 生成章节解说文案测试", t, func() {
 		// 使用 TestMain 中初始化的全局变量
 		ctx := testCtx

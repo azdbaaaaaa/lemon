@@ -59,7 +59,6 @@ func TestResourceService_UploadTXT(t *testing.T) {
 			So(err, ShouldBeNil)
 			So(uploadResult.ResourceID, ShouldNotBeEmpty)
 			So(uploadResult.FileSize, ShouldEqual, fileStat.Size())
-
 			Convey("步骤2: 验证资源记录", func() {
 				// 查询资源详情
 				resourceResult, err := services.ResourceService.GetResource(ctx, &service.GetResourceRequest{
