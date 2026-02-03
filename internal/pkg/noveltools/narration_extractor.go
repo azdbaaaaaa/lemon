@@ -40,12 +40,8 @@ func (ne *NarrationExtractor) ExtractNarrationTexts(content *novel.NarrationCont
 			continue
 		}
 
-		// 分镜级别的解说内容（可选）
-		if scene.Narration != "" {
-			narrationTexts = append(narrationTexts, scene.Narration)
-		}
-
-		// 特写级别的解说内容
+		// 只提取特写级别的解说内容（每个 shot 对应一个分镜）
+		// 不提取 scene.Narration，因为每个分镜应该只对应一个 shot.Narration
 		if scene.Shots != nil {
 			for _, shot := range scene.Shots {
 				if shot == nil {

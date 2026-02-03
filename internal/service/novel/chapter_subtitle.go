@@ -133,8 +133,8 @@ func (s *novelService) generateSingleSubtitle(
 		})
 	}
 
-	// 3. 使用 SubtitleSplitter 分割文本（默认每段最大12字符）
-	maxLength := 12
+	// 3. 使用 SubtitleSplitter 分割文本（每段最大20字符，避免字幕片段过短）
+	maxLength := 20
 	splitter := noveltools.NewSubtitleSplitter(maxLength)
 	segments := splitter.SplitTextNaturally(narrationText)
 

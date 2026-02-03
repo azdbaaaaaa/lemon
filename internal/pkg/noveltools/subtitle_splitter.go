@@ -9,8 +9,9 @@ import (
 
 // SubtitleSplitter 字幕文本分割器，用于将文本按自然方式分割为字幕段落
 type SubtitleSplitter struct {
-	maxLength int            // 每段最大字符数（默认12）
-	segmenter *gse.Segmenter // gse 分词器
+	maxLength    int           // 每段最大字符数（默认12）
+	segmenter    gse.Segmenter // gse 分词器
+	hasSegmenter bool          // 标记是否成功初始化分词器
 }
 
 // NewSubtitleSplitter 创建字幕文本分割器实例
@@ -21,14 +22,12 @@ func NewSubtitleSplitter(maxLength int) *SubtitleSplitter {
 
 	// 初始化 gse 分词器
 	segmenter, err := gse.New()
-	if err != nil {
-		// 如果初始化失败，使用空分词器（降级到字符分割）
-		segmenter = nil
-	}
+	hasSegmenter := err == nil
 
 	return &SubtitleSplitter{
-		maxLength: maxLength,
-		segmenter: segmenter,
+		maxLength:    maxLength,
+		segmenter:    segmenter,
+		hasSegmenter: hasSegmenter,
 	}
 }
 
@@ -110,7 +109,7 @@ func (ss *SubtitleSplitter) splitLongSentenceNaturally(sentence string) []string
 
 	// 使用 gse 分词获取词汇边界（参考 Python 版本的 jieba.cut）
 	var words []string
-	if ss.segmenter != nil {
+	if ss.hasSegmenter {
 		// 使用 gse 分词
 		words = ss.segmenter.Cut(sentence, false)
 	} else {
@@ -184,13 +183,22 @@ func (ss *SubtitleSplitter) findBestBreakPoint(text string, breakPoints map[rune
 	bestPriority := 999
 
 	// 从理想长度位置向前搜索自然断开点
+	// 参考 Python 版本：search_start = min(max_length - 1, len(text) - 1)
 	searchStart := ss.maxLength - 1
 	if searchStart >= len(text) {
 		searchStart = len(text) - 1
 	}
-	searchEnd := ss.maxLength / 2
+	// 至少保留一半长度，但不要太小（至少保留 maxLength/3）
+	searchEnd := ss.maxLength / 3
 	if searchEnd < 0 {
 		searchEnd = 0
+	}
+	// 确保搜索范围合理：至少搜索 maxLength/2 的范围
+	if searchStart-searchEnd < ss.maxLength/2 {
+		searchEnd = searchStart - ss.maxLength/2
+		if searchEnd < 0 {
+			searchEnd = 0
+		}
 	}
 
 	for i := searchStart; i >= searchEnd; i-- {
