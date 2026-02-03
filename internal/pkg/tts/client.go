@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -126,7 +125,8 @@ func NewClient(config Config) (*Client, error) {
 // Result TTS生成结果
 type Result struct {
 	Success       bool           `json:"success"`        // 是否成功
-	AudioPath     string         `json:"audio_path"`     // 音频文件路径
+	AudioData     []byte         `json:"-"`              // 音频数据（二进制，不序列化到 JSON）
+	Duration      float64        `json:"duration"`       // 音频时长（秒）
 	TimestampData *TimestampData `json:"timestamp_data"` // 时间戳数据
 	ErrorMessage  string         `json:"error_message"`  // 错误信息
 }
@@ -134,7 +134,6 @@ type Result struct {
 // TimestampData 时间戳数据
 type TimestampData struct {
 	Text                string          `json:"text"`                 // 原始文本
-	AudioFile           string          `json:"audio_file"`           // 音频文件路径
 	Duration            float64         `json:"duration"`             // 音频时长（秒）
 	CharacterTimestamps []CharTimestamp `json:"character_timestamps"` // 字符级时间戳
 	GeneratedAt         time.Time       `json:"generated_at"`         // 生成时间
@@ -148,15 +147,14 @@ type CharTimestamp struct {
 }
 
 // GenerateVoiceWithTimestamps 生成语音并获取时间戳
+// 返回音频数据和时长，不保存到文件
 func (c *Client) GenerateVoiceWithTimestamps(
 	ctx context.Context,
 	text string,
-	audioPath string,
 	speedRatio float64,
 ) (*Result, error) {
 	result := &Result{
-		Success:   false,
-		AudioPath: audioPath,
+		Success: false,
 	}
 
 	// 1. 构建请求配置
@@ -182,7 +180,7 @@ func (c *Client) GenerateVoiceWithTimestamps(
 
 	log.Debug().
 		Str("request_id", requestID).
-		Str("audio_path", audioPath).
+		Str("text", text).
 		Msg("sending TTS request")
 
 	resp, err := c.httpClient.Do(req)
@@ -226,7 +224,7 @@ func (c *Client) GenerateVoiceWithTimestamps(
 		return result, fmt.Errorf("API response error: %s", message)
 	}
 
-	// 6. 提取并保存音频数据
+	// 6. 提取音频数据
 	audioDataBase64, ok := apiResp["data"].(string)
 	if !ok {
 		result.ErrorMessage = "audio data not found in response"
@@ -239,30 +237,20 @@ func (c *Client) GenerateVoiceWithTimestamps(
 		return result, err
 	}
 
-	// 确保目录存在
-	if err := os.MkdirAll(filepath.Dir(audioPath), 0755); err != nil {
-		result.ErrorMessage = fmt.Sprintf("failed to create directory: %v", err)
-		return result, err
-	}
-
-	// 保存音频文件
-	if err := os.WriteFile(audioPath, audioData, 0644); err != nil {
-		result.ErrorMessage = fmt.Sprintf("failed to save audio file: %v", err)
-		return result, err
-	}
-
-	// 7. 解析时间戳数据
-	timestampData := c.parseTimestampData(apiResp, text, audioPath)
+	// 7. 解析时间戳数据和音频时长
+	timestampData, duration := c.parseTimestampData(apiResp, text)
 
 	result.Success = true
+	result.AudioData = audioData
+	result.Duration = duration
 	result.TimestampData = timestampData
 
 	return result, nil
 }
 
 // buildRequestConfig 构建请求配置
+// 参考官方文档: https://openspeech.bytedance.com/api/v1/tts
 func (c *Client) buildRequestConfig(text, requestID string, speedRatio float64) map[string]interface{} {
-	// 参考 Python 代码的请求配置格式和模板
 	appConfig := map[string]interface{}{
 		"token":   c.accessToken,
 		"cluster": c.cluster,
@@ -271,47 +259,72 @@ func (c *Client) buildRequestConfig(text, requestID string, speedRatio float64) 
 		appConfig["appid"] = c.appID
 	}
 
+	// 根据官方文档格式构建请求
+	audioConfig := map[string]interface{}{
+		"voice_type":       c.voiceType,
+		"encoding":         "mp3",
+		"compression_rate": 1,
+		"rate":             c.sampleRate,
+		"speed_ratio":      speedRatio,
+		"volume_ratio":     1.0,
+		"pitch_ratio":      1.0,
+		"language":         "cn",
+	}
+
+	requestConfig := map[string]interface{}{
+		"reqid":            requestID,
+		"text":             text,
+		"text_type":        "plain",
+		"operation":        "query",
+		"silence_duration": "125",
+		"with_frontend":    "1",
+		"frontend_type":    "unitTson",
+		"pure_english_opt": "1",
+	}
+
+	// extra_param 是可选的，如果需要可以添加
+	// extraParam := map[string]interface{}{
+	// 	"disable_emoji_filter": true,
+	// }
+	// extraParamJSON, _ := json.Marshal(extraParam)
+	// requestConfig["extra_param"] = string(extraParamJSON)
+
 	return map[string]interface{}{
-		"app": appConfig,
-		"user": map[string]interface{}{
-			"uid": requestID, // 使用 requestID 作为用户ID
-		},
-		"audio": map[string]interface{}{
-			"voice_type":  c.voiceType,
-			"encoding":    "mp3",
-			"sample_rate": c.sampleRate,
-			"speed_ratio": speedRatio,
-		},
-		"request": map[string]interface{}{
-			"reqid":         requestID,
-			"text":          text,
-			"text_type":     "plain",
-			"operation":     "query",
-			"with_frontend": 1, // 需要前端数据以获取时间戳
-			"frontend_type": "unitTson",
-		},
+		"app":     appConfig,
+		"user":    map[string]interface{}{"uid": requestID},
+		"audio":   audioConfig,
+		"request": requestConfig,
 	}
 }
 
-// parseTimestampData 解析时间戳数据
-func (c *Client) parseTimestampData(apiResp map[string]interface{}, text, audioPath string) *TimestampData {
+// parseTimestampData 解析时间戳数据和音频时长
+// 返回时间戳数据和音频时长（秒）
+func (c *Client) parseTimestampData(apiResp map[string]interface{}, text string) (*TimestampData, float64) {
 	timestampData := &TimestampData{
 		Text:                text,
-		AudioFile:           audioPath,
 		Duration:            0,
 		CharacterTimestamps: []CharTimestamp{},
 		GeneratedAt:         time.Now(),
 	}
 
+	var duration float64
+
 	// 从 addition 字段获取时间戳信息
 	addition, ok := apiResp["addition"].(map[string]interface{})
 	if !ok {
-		return timestampData
+		return timestampData, duration
 	}
 
 	// 获取 duration（单位：毫秒，需要转换为秒）
-	if duration, ok := addition["duration"].(float64); ok {
-		timestampData.Duration = duration / 1000.0
+	// duration 可能是字符串或数字
+	if durationStr, ok := addition["duration"].(string); ok {
+		if parsed, err := strconv.ParseFloat(durationStr, 64); err == nil {
+			duration = parsed / 1000.0 // 转换为秒
+			timestampData.Duration = duration
+		}
+	} else if durationNum, ok := addition["duration"].(float64); ok {
+		duration = durationNum / 1000.0 // 转换为秒
+		timestampData.Duration = duration
 	}
 
 	// 解析 frontend 字段（包含字符级时间戳）
@@ -321,19 +334,19 @@ func (c *Client) parseTimestampData(apiResp map[string]interface{}, text, audioP
 		if frontendObj, ok := addition["frontend"].(map[string]interface{}); ok {
 			c.parseFrontendData(frontendObj, timestampData)
 		}
-		return timestampData
+		return timestampData, duration
 	}
 
 	// 解析 JSON 字符串
 	var frontendData map[string]interface{}
 	if err := json.Unmarshal([]byte(frontendStr), &frontendData); err != nil {
 		log.Warn().Err(err).Msg("failed to parse frontend data")
-		return timestampData
+		return timestampData, duration
 	}
 
 	c.parseFrontendData(frontendData, timestampData)
 
-	return timestampData
+	return timestampData, duration
 }
 
 // parseFrontendData 解析前端数据中的时间戳

@@ -31,23 +31,20 @@ func NewByteDanceTTSProvider(client *tts.Client) *ByteDanceTTSProvider {
 func (p *ByteDanceTTSProvider) GenerateVoiceWithTimestamps(
 	ctx context.Context,
 	text string,
-	audioPath string,
 	speedRatio float64,
 ) (*noveltools.TTSResult, error) {
 	if p.client == nil {
 		return &noveltools.TTSResult{
 			Success:      false,
-			AudioPath:    audioPath,
 			ErrorMessage: "TTS client is required",
 		}, nil
 	}
 
 	// 调用 tts.Client，返回 tts.Result
-	ttsResult, err := p.client.GenerateVoiceWithTimestamps(ctx, text, audioPath, speedRatio)
+	ttsResult, err := p.client.GenerateVoiceWithTimestamps(ctx, text, speedRatio)
 	if err != nil {
 		return &noveltools.TTSResult{
 			Success:      false,
-			AudioPath:    audioPath,
 			ErrorMessage: err.Error(),
 		}, err
 	}
@@ -55,14 +52,14 @@ func (p *ByteDanceTTSProvider) GenerateVoiceWithTimestamps(
 	// 转换 tts.Result 到 noveltools.TTSResult
 	result := &noveltools.TTSResult{
 		Success:      ttsResult.Success,
-		AudioPath:    ttsResult.AudioPath,
+		AudioData:    ttsResult.AudioData,
+		Duration:     ttsResult.Duration,
 		ErrorMessage: ttsResult.ErrorMessage,
 	}
 
 	if ttsResult.TimestampData != nil {
 		result.TimestampData = &noveltools.TimestampData{
 			Text:                ttsResult.TimestampData.Text,
-			AudioFile:           ttsResult.TimestampData.AudioFile,
 			Duration:            ttsResult.TimestampData.Duration,
 			CharacterTimestamps: convertCharTimestamps(ttsResult.TimestampData.CharacterTimestamps),
 			GeneratedAt:         ttsResult.TimestampData.GeneratedAt,

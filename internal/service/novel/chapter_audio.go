@@ -1,11 +1,9 @@
 package novel
 
 import (
+	"bytes"
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
-	"time"
 
 	"github.com/rs/zerolog/log"
 
@@ -99,14 +97,9 @@ func (s *novelService) generateSingleAudio(
 	text string,
 	version int,
 ) (string, error) {
-	// 1. 创建临时文件用于保存音频
-	tmpDir := os.TempDir()
-	tmpAudioPath := filepath.Join(tmpDir, fmt.Sprintf("audio_%s_%d_%d.mp3", narration.ID, sequence, time.Now().Unix()))
-	defer os.Remove(tmpAudioPath) // 清理临时文件
-
-	// 2. 调用 TTS Provider 生成音频（1.2倍速，参考 Python 脚本）
+	// 1. 调用 TTS Provider 生成音频（1.2倍速，参考 Python 脚本）
 	speedRatio := 1.2
-	ttsResult, err := s.ttsProvider.GenerateVoiceWithTimestamps(ctx, text, tmpAudioPath, speedRatio)
+	ttsResult, err := s.ttsProvider.GenerateVoiceWithTimestamps(ctx, text, speedRatio)
 	if err != nil {
 		return "", fmt.Errorf("TTS generation failed: %w", err)
 	}
@@ -118,31 +111,18 @@ func (s *novelService) generateSingleAudio(
 	// 构建 TTS 参数提示词（记录生成参数）
 	ttsPrompt := fmt.Sprintf("TTS参数: speedRatio=%.2f, textLength=%d", speedRatio, len(text))
 
-	// 3. 读取生成的音频文件
-	audioFile, err := os.Open(tmpAudioPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to open audio file: %w", err)
-	}
-	defer audioFile.Close()
-
-	// 4. 通过 resource 模块上传音频文件
+	// 2. 通过 resource 模块上传音频文件（直接使用返回的音频数据）
 	userID := narration.UserID
 	fileName := fmt.Sprintf("%s_audio_%02d.mp3", narration.ID, sequence)
 	contentType := "audio/mpeg"
 	ext := "mp3"
 
-	_, err = audioFile.Seek(0, 0)
-	if err != nil {
-		return "", fmt.Errorf("failed to seek audio file: %w", err)
-	}
-
-	// 使用 resource 模块上传文件
 	uploadReq := &service.UploadFileRequest{
 		UserID:      userID,
 		FileName:    fileName,
 		ContentType: contentType,
 		Ext:         ext,
-		Data:        audioFile,
+		Data:        bytes.NewReader(ttsResult.AudioData),
 	}
 
 	uploadResult, err := s.resourceService.UploadFile(ctx, uploadReq)
@@ -152,7 +132,7 @@ func (s *novelService) generateSingleAudio(
 
 	resourceID := uploadResult.ResourceID
 
-	// 6. 转换时间戳数据
+	// 3. 转换时间戳数据
 	charTimes := make([]novel.CharTime, 0, len(ttsResult.TimestampData.CharacterTimestamps))
 	for _, ts := range ttsResult.TimestampData.CharacterTimestamps {
 		charTimes = append(charTimes, novel.CharTime{
@@ -162,16 +142,20 @@ func (s *novelService) generateSingleAudio(
 		})
 	}
 
-	// 7. 获取音频时长（如果 TTS API 返回的 duration 为 0，使用默认值 10 秒）
-	audioDuration := ttsResult.TimestampData.Duration
+	// 4. 获取音频时长（使用 TTS API 返回的真实时长）
+	audioDuration := ttsResult.Duration
 	if audioDuration <= 0 {
-		// TODO: 修复 TTS API 返回字段解析问题，正确从 addition.duration 或 frontend 数据中提取真实时长
-		// 当前临时方案：如果解析失败，默认使用 10 秒
-		audioDuration = 10.0
-		log.Warn().
-			Str("narration_id", narration.ID).
-			Int("sequence", sequence).
-			Msg("TTS API 返回的 duration 为 0，使用默认值 10 秒")
+		// 如果 Duration 为 0，尝试从 TimestampData 获取
+		if ttsResult.TimestampData != nil && ttsResult.TimestampData.Duration > 0 {
+			audioDuration = ttsResult.TimestampData.Duration
+		} else {
+			// 降级方案：如果都获取不到，使用默认值 10 秒
+			audioDuration = 10.0
+			log.Warn().
+				Str("narration_id", narration.ID).
+				Int("sequence", sequence).
+				Msg("TTS API 返回的 duration 为 0，使用默认值 10 秒")
+		}
 	}
 
 	// 8. 创建 chapter_audio 记录

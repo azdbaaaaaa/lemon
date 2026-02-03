@@ -24,20 +24,19 @@ type LLMProvider interface {
 // 参考 Python 脚本 gen_audio.py 的 VoiceGenerator.generate_voice_with_timestamps
 type TTSProvider interface {
 	// GenerateVoiceWithTimestamps 生成语音并获取时间戳
+	// 返回音频数据和时长，不保存到文件
 	//
 	// Args:
 	//   - ctx: 上下文
 	//   - text: 要转换的文本
-	//   - audioPath: 音频文件保存路径
 	//   - speedRatio: 语速比例（默认1.0，1.2表示1.2倍速）
 	//
 	// Returns:
-	//   - result: 生成结果
+	//   - result: 生成结果（包含音频数据和时长）
 	//   - err: 错误信息
 	GenerateVoiceWithTimestamps(
 		ctx context.Context,
 		text string,
-		audioPath string,
 		speedRatio float64,
 	) (*TTSResult, error)
 }
@@ -59,7 +58,8 @@ type ImageProvider interface {
 // TTSResult TTS生成结果
 type TTSResult struct {
 	Success       bool           `json:"success"`        // 是否成功
-	AudioPath     string         `json:"audio_path"`     // 音频文件路径
+	AudioData     []byte         `json:"-"`              // 音频数据（二进制，不序列化到 JSON）
+	Duration      float64        `json:"duration"`       // 音频时长（秒）
 	TimestampData *TimestampData `json:"timestamp_data"` // 时间戳数据
 	ErrorMessage  string         `json:"error_message"`  // 错误信息
 }
@@ -67,7 +67,6 @@ type TTSResult struct {
 // TimestampData 时间戳数据
 type TimestampData struct {
 	Text                string          `json:"text"`                 // 原始文本
-	AudioFile           string          `json:"audio_file"`           // 音频文件路径
 	Duration            float64         `json:"duration"`             // 音频时长（秒）
 	CharacterTimestamps []CharTimestamp `json:"character_timestamps"` // 字符级时间戳
 	GeneratedAt         time.Time       `json:"generated_at"`         // 生成时间
