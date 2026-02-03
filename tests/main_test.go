@@ -588,18 +588,11 @@ func requireTestImages(ctx context.Context, t *testing.T, narrationID string, mi
 	}
 }
 
-// requireTestFirstVideos 要求必须有 first_video，否则报错并提示先运行 TestNovelService_GenerateFirstVideos
+// requireTestFirstVideos 已废弃：现在所有视频都使用图生视频方式，不再需要 first_video
+// DEPRECATED: 此函数已不再使用
 func requireTestFirstVideos(ctx context.Context, t *testing.T, chapterID string) {
-	var videoModel novel.ChapterVideo
-	videoColl := testDB.Collection(videoModel.Collection())
-	videoFilter := bson.M{"chapter_id": chapterID, "video_type": "first_video", "deleted_at": nil, "status": "completed"}
-	videoCount, err := videoColl.CountDocuments(ctx, videoFilter)
-	if err != nil {
-		t.Fatalf("测试失败：查询 first_video 记录失败: %v", err)
-	}
-	if videoCount == 0 {
-		t.Fatal("测试失败：未找到已完成的 first_video。请先运行 TestNovelService_GenerateFirstVideos 生成前两张图片的视频。")
-	}
+	// 不再需要 first_video，直接跳过
+	t.Log("注意：requireTestFirstVideos 已废弃，现在所有视频都使用图生视频方式")
 }
 
 // requireTestNarrationVideos 要求必须有 narration_video，否则报错并提示先运行 TestNovelService_GenerateNarrationVideos

@@ -26,48 +26,8 @@ import (
 	"lemon/internal/model/novel"
 )
 
-// TestNovelService_GenerateFirstVideos 测试为章节的前两张图片生成视频
-func TestNovelService_GenerateFirstVideos(t *testing.T) {
-	Convey("NovelService 生成前两张图片视频测试", t, func() {
-		// 使用 TestMain 中初始化的全局变量
-		ctx := testCtx
-		services := testServices
-
-		userID := "test_user_novel_001"
-
-		// 步骤1: 查找或创建测试章节（优先使用数据库中已有的）
-		_, chapters := findOrCreateTestChapters(ctx, t, services, userID)
-		So(len(chapters), ShouldBeGreaterThan, 0)
-
-		chapterID := chapters[0].ID
-
-		// 步骤2: 要求必须有测试解说文案和图片，否则报错
-		narrationID, _ := requireTestNarration(ctx, t, services, userID)
-		So(narrationID, ShouldNotBeEmpty)
-
-		// 要求至少有2张图片
-		requireTestImages(ctx, t, narrationID, 2)
-
-		Convey("步骤3: 为章节的前两张图片生成视频（异步）", func() {
-			// 为章节的前两张图片生成视频（在 goroutine 中异步执行）
-			videoIDs, err := services.NovelService.GenerateFirstVideosForChapter(ctx, chapterID)
-			So(err, ShouldBeNil)
-			So(len(videoIDs), ShouldBeGreaterThan, 0)
-
-			Convey("验证视频任务已创建并等待完成", func() {
-				// 验证返回的 videoIDs 不为空
-				So(len(videoIDs), ShouldBeGreaterThan, 0)
-
-				// 等待视频生成完成（最多等待 5 分钟）
-				// 注意：视频生成是异步的，需要等待 goroutine 执行完成
-				waitForVideosComplete(ctx, t, services, chapterID, "first_video", 5*time.Minute)
-			})
-		})
-	})
-}
-
-// TestNovelService_GenerateNarrationVideos 测试为章节生成所有 narration 视频
-func TestNovelService_GenerateNarrationVideos(t *testing.T) {
+// TestNovelService_GenerateVideo_Narration 测试为章节生成所有 narration 视频
+func TestNovelService_GenerateVideo_Narration(t *testing.T) {
 	Convey("NovelService 生成 narration 视频测试", t, func() {
 		// 使用 TestMain 中初始化的全局变量
 		ctx := testCtx
@@ -125,8 +85,8 @@ func TestNovelService_GenerateNarrationVideos(t *testing.T) {
 	})
 }
 
-// TestNovelService_GenerateFinalVideo 测试生成章节的最终完整视频
-func TestNovelService_GenerateFinalVideo(t *testing.T) {
+// TestNovelService_GenerateVideo_Final 测试生成章节的最终完整视频
+func TestNovelService_GenerateVideo_Final(t *testing.T) {
 	Convey("NovelService 生成最终完整视频测试", t, func() {
 		// 使用 TestMain 中初始化的全局变量
 		ctx := testCtx
@@ -190,15 +150,6 @@ func TestNovelService_GenerateVideos_CompleteFlow(t *testing.T) {
 
 		// 要求至少有2张图片
 		requireTestImages(ctx, t, narrationID, 2)
-
-		Convey("步骤3: 生成前两张图片的视频（first_video）", func() {
-			videoIDs, err := services.NovelService.GenerateFirstVideosForChapter(ctx, chapterID)
-			So(err, ShouldBeNil)
-			So(len(videoIDs), ShouldBeGreaterThan, 0)
-
-			// 等待 first_video 完成
-			waitForVideosComplete(ctx, t, services, chapterID, "first_video", 60*time.Second)
-		})
 
 		Convey("步骤4: 生成所有 narration 视频", func() {
 			videoIDs, err := services.NovelService.GenerateNarrationVideosForChapter(ctx, chapterID)

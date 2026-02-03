@@ -15,7 +15,6 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"lemon/internal/model/novel"
-	"lemon/internal/pkg/ark"
 	"lemon/internal/pkg/ffmpeg"
 	"lemon/internal/pkg/id"
 	"lemon/internal/service"
@@ -24,12 +23,9 @@ import (
 // VideoService 章节视频服务接口
 // 定义章节视频相关的能力
 type VideoService interface {
-	// GenerateFirstVideosForChapter 为章节的前两张图片生成视频（对应 gen_first_video_async.py）
-	// 在 goroutine 中异步执行，自动使用最新版本号+1
-	GenerateFirstVideosForChapter(ctx context.Context, chapterID string) ([]string, error)
-
 	// GenerateNarrationVideosForChapter 为章节生成所有 narration 视频（对应 concat_narration_video.py）
 	// 合并 narration 视频，添加 BGM 和音效
+	// 所有视频都使用图生视频方式（Ark API），不再需要 first_video
 	GenerateNarrationVideosForChapter(ctx context.Context, chapterID string) ([]string, error)
 
 	// GenerateFinalVideoForChapter 生成章节的最终完整视频（对应 concat_finish_video.py）
@@ -43,271 +39,19 @@ type VideoService interface {
 	GetVideosByStatus(ctx context.Context, status string) ([]*novel.ChapterVideo, error)
 }
 
-// GenerateFirstVideosForChapter 为章节的前两张图片生成视频
-// 对应 Python: gen_first_video_async.py
+// GenerateFirstVideosForChapter 已废弃：现在所有视频都使用图生视频方式，不再需要 first_video
+// DEPRECATED: 使用 GenerateNarrationVideosForChapter 即可，所有视频都通过图生视频生成
 func (s *novelService) GenerateFirstVideosForChapter(ctx context.Context, chapterID string) ([]string, error) {
-	// 1. 获取章节信息
-	chapter, err := s.chapterRepo.FindByID(ctx, chapterID)
-	if err != nil {
-		return nil, fmt.Errorf("find chapter: %w", err)
-	}
-
-	// 2. 获取章节的前两张图片（sequence=1 和 sequence=2）
-	images, err := s.chapterImageRepo.FindByChapterID(ctx, chapterID)
-	if err != nil {
-		return nil, fmt.Errorf("find chapter images: %w", err)
-	}
-
-	// 找到 sequence=1 和 sequence=2 的图片
-	var firstImage, secondImage *novel.ChapterImage
-	for _, img := range images {
-		if img.Sequence == 1 {
-			firstImage = img
-		} else if img.Sequence == 2 {
-			secondImage = img
-		}
-	}
-
-	if firstImage == nil || secondImage == nil {
-		return nil, fmt.Errorf("chapter must have at least 2 images (sequence 1 and 2)")
-	}
-
-	// 3. 获取对应的音频时长（sequence=1 和 sequence=2）
-	audios, err := s.audioRepo.FindByChapterID(ctx, chapterID)
-	if err != nil {
-		return nil, fmt.Errorf("find chapter audios: %w", err)
-	}
-
-	var duration1, duration2 float64
-	for _, audio := range audios {
-		if audio.Sequence == 1 {
-			duration1 = audio.Duration
-		} else if audio.Sequence == 2 {
-			duration2 = audio.Duration
-		}
-	}
-
-	if duration1 == 0 {
-		duration1 = 5 // 默认 5 秒
-	}
-	if duration2 == 0 {
-		duration2 = 5 // 默认 5 秒
-	}
-
-	// 4. 自动生成下一个版本号
-	videoVersion, err := s.getNextVideoVersion(ctx, chapterID, 0)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get next video version: %w", err)
-	}
-
-	// 5. 初始化 Ark 视频客户端
-	videoConfig := ark.ArkVideoConfigFromEnv()
-	arkVideoClient, err := ark.NewArkVideoClient(videoConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create Ark video client: %w", err)
-	}
-
-	// 6. 在 goroutine 中异步生成两个视频
-	var videoIDs []string
-	video1ID := id.New()
-	video2ID := id.New()
-
-	// 创建视频记录（状态为 pending）
-	video1Entity := &novel.ChapterVideo{
-		ID:        video1ID,
-		ChapterID: chapterID,
-		UserID:    chapter.UserID,
-		Sequence:  1,
-		VideoType: "first_video",
-		Version:   videoVersion,
-		Status:    "pending",
-	}
-	if err := s.videoRepo.Create(ctx, video1Entity); err != nil {
-		return nil, fmt.Errorf("failed to create video1 record: %w", err)
-	}
-
-	video2Entity := &novel.ChapterVideo{
-		ID:        video2ID,
-		ChapterID: chapterID,
-		UserID:    chapter.UserID,
-		Sequence:  2,
-		VideoType: "first_video",
-		Version:   videoVersion,
-		Status:    "pending",
-	}
-	if err := s.videoRepo.Create(ctx, video2Entity); err != nil {
-		return nil, fmt.Errorf("failed to create video2 record: %w", err)
-	}
-
-	videoIDs = append(videoIDs, video1ID, video2ID)
-
-	// 在 goroutine 中异步生成视频
-	go func() {
-		// 添加 panic 恢复机制，确保即使 panic 也能记录错误
-		defer func() {
-			if r := recover(); r != nil {
-				log.Error().
-					Interface("panic", r).
-					Str("video1_id", video1ID).
-					Str("video2_id", video2ID).
-					Msg("生成视频时发生 panic")
-				// 尝试更新状态为 failed
-				ctx := context.Background()
-				if err := s.videoRepo.UpdateStatus(ctx, video1ID, "failed", fmt.Sprintf("panic: %v", r)); err != nil {
-					log.Error().Err(err).Str("video_id", video1ID).Msg("更新视频状态失败")
-				}
-				if err := s.videoRepo.UpdateStatus(ctx, video2ID, "failed", fmt.Sprintf("panic: %v", r)); err != nil {
-					log.Error().Err(err).Str("video_id", video2ID).Msg("更新视频状态失败")
-				}
-			}
-		}()
-
-		// 验证参数
-		if firstImage == nil {
-			log.Error().Str("video_id", video1ID).Msg("firstImage 为 nil，无法生成视频")
-			ctx := context.Background()
-			if err := s.videoRepo.UpdateStatus(ctx, video1ID, "failed", "firstImage is nil"); err != nil {
-				log.Error().Err(err).Str("video_id", video1ID).Msg("更新视频状态失败")
-			}
-			return
-		}
-		if secondImage == nil {
-			log.Error().Str("video_id", video2ID).Msg("secondImage 为 nil，无法生成视频")
-			ctx := context.Background()
-			if err := s.videoRepo.UpdateStatus(ctx, video2ID, "failed", "secondImage is nil"); err != nil {
-				log.Error().Err(err).Str("video_id", video2ID).Msg("更新视频状态失败")
-			}
-			return
-		}
-		if arkVideoClient == nil {
-			log.Error().Str("video1_id", video1ID).Str("video2_id", video2ID).Msg("arkVideoClient 为 nil，无法生成视频")
-			ctx := context.Background()
-			if err := s.videoRepo.UpdateStatus(ctx, video1ID, "failed", "arkVideoClient is nil"); err != nil {
-				log.Error().Err(err).Str("video_id", video1ID).Msg("更新视频状态失败")
-			}
-			if err := s.videoRepo.UpdateStatus(ctx, video2ID, "failed", "arkVideoClient is nil"); err != nil {
-				log.Error().Err(err).Str("video_id", video2ID).Msg("更新视频状态失败")
-			}
-			return
-		}
-
-		log.Info().
-			Str("video1_id", video1ID).
-			Str("video2_id", video2ID).
-			Msg("开始异步生成视频")
-
-		// 生成第一个视频
-		if err := s.generateSingleFirstVideo(context.Background(), video1ID, firstImage, int(duration1), arkVideoClient, chapter.UserID); err != nil {
-			log.Error().Err(err).Str("video_id", video1ID).Msg("生成第一个视频失败")
-		}
-
-		// 生成第二个视频
-		if err := s.generateSingleFirstVideo(context.Background(), video2ID, secondImage, int(duration2), arkVideoClient, chapter.UserID); err != nil {
-			log.Error().Err(err).Str("video_id", video2ID).Msg("生成第二个视频失败")
-		}
-	}()
-
-	return videoIDs, nil
-}
-
-// generateSingleFirstVideo 生成单个前两张图片的视频
-func (s *novelService) generateSingleFirstVideo(
-	ctx context.Context,
-	videoID string,
-	image *novel.ChapterImage,
-	duration int,
-	arkVideoClient *ark.ArkVideoClient,
-	userID string,
-) error {
-	log.Info().
-		Str("video_id", videoID).
-		Str("image_resource_id", image.ImageResourceID).
-		Int("duration", duration).
-		Msg("开始生成视频")
-
-	// 更新状态为 processing
-	if err := s.videoRepo.UpdateStatus(ctx, videoID, "processing", ""); err != nil {
-		log.Error().Err(err).Str("video_id", videoID).Msg("更新状态为 processing 失败")
-		return fmt.Errorf("update status to processing: %w", err)
-	}
-
-	log.Info().Str("video_id", videoID).Msg("状态已更新为 processing")
-
-	// 1. 从 resource 模块下载图片
-	downloadReq := &service.DownloadFileRequest{
-		ResourceID: image.ImageResourceID,
-		UserID:     userID,
-	}
-
-	downloadResult, err := s.resourceService.DownloadFile(ctx, downloadReq)
-	if err != nil {
-		s.videoRepo.UpdateStatus(ctx, videoID, "failed", fmt.Sprintf("failed to download image: %v", err))
-		return fmt.Errorf("download image: %w", err)
-	}
-
-	// 2. 读取图片数据
-	imageData, err := io.ReadAll(downloadResult.Data)
-	if err != nil {
-		s.videoRepo.UpdateStatus(ctx, videoID, "failed", fmt.Sprintf("failed to read image data: %v", err))
-		return fmt.Errorf("read image data: %w", err)
-	}
-	defer downloadResult.Data.Close()
-
-	// 3. 将图片转换为 base64 data URL
-	imageDataURL := ark.ConvertImageToDataURL(imageData, "image/jpeg")
-
-	// 4. 调用 Ark API 生成视频（内部会轮询等待）
-	prompt := "画面有明显的动态效果，动作大一些"
-	videoData, err := arkVideoClient.GenerateVideoFromImage(ctx, imageDataURL, duration, prompt)
-	if err != nil {
-		s.videoRepo.UpdateStatus(ctx, videoID, "failed", fmt.Sprintf("Ark API failed: %v", err))
-		return fmt.Errorf("generate video from image: %w", err)
-	}
-
-	// 5. 上传视频到 resource 模块
-	fileName := fmt.Sprintf("%s_video_%d.mp4", image.ChapterID, image.Sequence)
-	contentType := "video/mp4"
-	ext := "mp4"
-
-	uploadReq := &service.UploadFileRequest{
-		UserID:      userID,
-		FileName:    fileName,
-		ContentType: contentType,
-		Ext:         ext,
-		Data:        bytes.NewReader(videoData),
-	}
-
-	uploadResult, err := s.resourceService.UploadFile(ctx, uploadReq)
-	if err != nil {
-		s.videoRepo.UpdateStatus(ctx, videoID, "failed", fmt.Sprintf("failed to upload video: %v", err))
-		return fmt.Errorf("upload video file: %w", err)
-	}
-
-	// 6. 更新视频记录
-	if err := s.videoRepo.UpdateVideoResourceID(ctx, videoID, uploadResult.ResourceID, float64(duration), prompt); err != nil {
-		return fmt.Errorf("update video resource ID: %w", err)
-	}
-
-	if err := s.videoRepo.UpdateStatus(ctx, videoID, "completed", ""); err != nil {
-		return fmt.Errorf("update status: %w", err)
-	}
-
-	log.Info().
-		Str("video_id", videoID).
-		Str("resource_id", uploadResult.ResourceID).
-		Int("duration", duration).
-		Msg("第一个视频生成成功")
-
-	return nil
+	return nil, fmt.Errorf("GenerateFirstVideosForChapter is deprecated, use GenerateNarrationVideosForChapter instead")
 }
 
 // GenerateNarrationVideosForChapter 为章节生成所有 narration 视频
 // 对应 Python: concat_narration_video.py
 // 逻辑：
 //   - 从 ChapterNarration.Content.Scenes[].Shots[] 中提取所有 Shots
-//   - 按照顺序编号为 narration_01, narration_02, narration_03, ...
-//   - narration_01-03: 合并成一个视频（完全使用图生视频，image_01-03 按音频时长分配）
-//   - narration_04-30: 每个单独生成视频（静态图片转视频）
+//   - 按照顺序为每个场景生成视频
+//   - 内部实现决定：前3个场景合并成一个视频，其他场景每个单独生成视频
+//   - 所有视频都使用图生视频方式（从图片生成视频）
 func (s *novelService) GenerateNarrationVideosForChapter(ctx context.Context, chapterID string) ([]string, error) {
 	// 1. 获取章节的 narration
 	narration, err := s.narrationRepo.FindByChapterID(ctx, chapterID)
@@ -366,18 +110,20 @@ func (s *novelService) GenerateNarrationVideosForChapter(ctx context.Context, ch
 
 	var videoIDs []string
 
-	// 6. 处理 narration_01-03：合并成一个视频（完全使用图生视频，不再依赖 first_video）
+	// 6. 为每个场景生成视频
+	// 内部实现：前3个场景合并成一个视频，其他场景每个单独生成视频
+	// 所有视频都使用图生视频方式
 	if len(allShots) >= 3 {
-		// 统一使用图生视频，不再需要 first_video
+		// 前3个场景合并成一个视频
 		mergedVideoID, err := s.generateMergedNarrationVideo(ctx, chapterID, narration, allShots[0:3], nil, videoVersion, ffmpegClient)
 		if err != nil {
-			log.Error().Err(err).Msg("生成合并 narration_01-03 视频失败")
+			log.Error().Err(err).Msg("生成合并视频失败（前3个场景）")
 		} else {
 			videoIDs = append(videoIDs, mergedVideoID)
 		}
 	}
 
-	// 7. 处理 narration_04-30：每个单独生成视频
+	// 其他场景每个单独生成视频
 	if len(allShots) > 3 {
 		for i := 3; i < len(allShots) && i < 30; i++ {
 			shotInfo := allShots[i]
@@ -385,7 +131,7 @@ func (s *novelService) GenerateNarrationVideosForChapter(ctx context.Context, ch
 
 			videoID, err := s.generateSingleNarrationVideo(ctx, chapterID, narration, shotInfo, narrationNum, videoVersion, ffmpegClient)
 			if err != nil {
-				log.Error().Err(err).Str("narration_num", narrationNum).Msg("生成 narration 视频失败")
+				log.Error().Err(err).Str("narration_num", narrationNum).Msg("生成场景视频失败")
 				continue
 			}
 			videoIDs = append(videoIDs, videoID)
@@ -395,7 +141,8 @@ func (s *novelService) GenerateNarrationVideosForChapter(ctx context.Context, ch
 	return videoIDs, nil
 }
 
-// generateNarration01Video 生成 narration_01 视频（使用 video_1 作为基础）
+// generateNarration01Video 已废弃：现在所有视频都使用图生视频方式，不再需要 first_video
+// DEPRECATED: 此函数已不再使用，narration_01-03 现在通过 generateMergedNarrationVideo 统一生成
 func (s *novelService) generateNarration01Video(
 	ctx context.Context,
 	narration *novel.ChapterNarration,
@@ -403,177 +150,7 @@ func (s *novelService) generateNarration01Video(
 	version int,
 	ffmpegClient *ffmpeg.Client,
 ) (string, error) {
-	// 1. 获取 narration_01 的音频时长
-	audios, err := s.audioRepo.FindByNarrationID(ctx, narration.ID)
-	if err != nil {
-		return "", fmt.Errorf("find audios: %w", err)
-	}
-
-	var audioDuration float64
-	for _, audio := range audios {
-		audioDuration += audio.Duration
-	}
-
-	if audioDuration == 0 {
-		return "", fmt.Errorf("audio duration is 0")
-	}
-
-	// 2. 下载 video_1
-	downloadReq := &service.DownloadFileRequest{
-		ResourceID: video1.VideoResourceID,
-		UserID:     narration.UserID,
-	}
-	video1Result, err := s.resourceService.DownloadFile(ctx, downloadReq)
-	if err != nil {
-		return "", fmt.Errorf("download video_1: %w", err)
-	}
-	defer video1Result.Data.Close()
-
-	// 3. 创建临时文件
-	tmpDir := os.TempDir()
-	tmpVideo1Path := filepath.Join(tmpDir, fmt.Sprintf("video1_%s.mp4", id.New()))
-	defer os.Remove(tmpVideo1Path)
-
-	// 保存 video_1 到临时文件
-	video1File, err := os.Create(tmpVideo1Path)
-	if err != nil {
-		return "", fmt.Errorf("create temp video file: %w", err)
-	}
-	if _, err := io.Copy(video1File, video1Result.Data); err != nil {
-		video1File.Close()
-		return "", fmt.Errorf("copy video data: %w", err)
-	}
-	video1File.Close()
-
-	// 4. 裁剪 video_1 到音频时长
-	tmpCroppedPath := filepath.Join(tmpDir, fmt.Sprintf("video1_cropped_%s.mp4", id.New()))
-	defer os.Remove(tmpCroppedPath)
-
-	if err := ffmpegClient.CropVideo(ctx, tmpVideo1Path, tmpCroppedPath, audioDuration); err != nil {
-		return "", fmt.Errorf("crop video: %w", err)
-	}
-
-	// 5. 获取字幕文件（使用 sequence=1，对应 narration_01）
-	subtitle, err := s.subtitleRepo.FindByNarrationIDAndSequence(ctx, narration.ID, 1)
-	if err != nil {
-		return "", fmt.Errorf("find subtitle for sequence 1: %w", err)
-	}
-
-	// 下载字幕文件
-	subtitleDownloadReq := &service.DownloadFileRequest{
-		ResourceID: subtitle.SubtitleResourceID,
-		UserID:     narration.UserID,
-	}
-	subtitleResult, err := s.resourceService.DownloadFile(ctx, subtitleDownloadReq)
-	if err != nil {
-		return "", fmt.Errorf("download subtitle: %w", err)
-	}
-	defer subtitleResult.Data.Close()
-
-	// 保存字幕到临时文件
-	tmpSubtitlePath := filepath.Join(tmpDir, fmt.Sprintf("subtitle_%s.ass", id.New()))
-	defer os.Remove(tmpSubtitlePath)
-	subtitleFile, err := os.Create(tmpSubtitlePath)
-	if err != nil {
-		return "", fmt.Errorf("create temp subtitle file: %w", err)
-	}
-	if _, err := io.Copy(subtitleFile, subtitleResult.Data); err != nil {
-		subtitleFile.Close()
-		return "", fmt.Errorf("copy subtitle data: %w", err)
-	}
-	subtitleFile.Close()
-
-	// 6. 获取音频文件
-	audioDownloadReq := &service.DownloadFileRequest{
-		ResourceID: audios[0].AudioResourceID,
-		UserID:     narration.UserID,
-	}
-	audioResult, err := s.resourceService.DownloadFile(ctx, audioDownloadReq)
-	if err != nil {
-		return "", fmt.Errorf("download audio: %w", err)
-	}
-	defer audioResult.Data.Close()
-
-	// 保存音频到临时文件
-	tmpAudioPath := filepath.Join(tmpDir, fmt.Sprintf("audio_%s.mp3", id.New()))
-	defer os.Remove(tmpAudioPath)
-	audioFile, err := os.Create(tmpAudioPath)
-	if err != nil {
-		return "", fmt.Errorf("create temp audio file: %w", err)
-	}
-	if _, err := io.Copy(audioFile, audioResult.Data); err != nil {
-		audioFile.Close()
-		return "", fmt.Errorf("copy audio data: %w", err)
-	}
-	audioFile.Close()
-
-	// 7. 添加字幕到视频
-	tmpWithSubtitlePath := filepath.Join(tmpDir, fmt.Sprintf("video_subtitle_%s.mp4", id.New()))
-	defer os.Remove(tmpWithSubtitlePath)
-
-	if err := ffmpegClient.AddSubtitles(ctx, tmpCroppedPath, tmpSubtitlePath, tmpWithSubtitlePath); err != nil {
-		return "", fmt.Errorf("add subtitles: %w", err)
-	}
-
-	// 8. 混合音频（视频音频 + narration 音频）
-	tmpFinalPath := filepath.Join(tmpDir, fmt.Sprintf("video_final_%s.mp4", id.New()))
-	defer os.Remove(tmpFinalPath)
-
-	// 简化：直接替换音频（不使用 BGM 和音效，第一版可简化）
-	// TODO: 后续添加 BGM 和音效支持
-	if err := s.replaceVideoAudio(ctx, tmpWithSubtitlePath, tmpAudioPath, tmpFinalPath, ffmpegClient); err != nil {
-		return "", fmt.Errorf("replace audio: %w", err)
-	}
-
-	// 9. 标准化视频分辨率
-	tmpStandardizedPath := filepath.Join(tmpDir, fmt.Sprintf("video_std_%s.mp4", id.New()))
-	defer os.Remove(tmpStandardizedPath)
-
-	if err := ffmpegClient.StandardizeVideo(ctx, tmpFinalPath, tmpStandardizedPath, 720, 1280, 30); err != nil {
-		return "", fmt.Errorf("standardize video: %w", err)
-	}
-
-	// 10. 上传最终视频到 resource 模块
-	finalVideoFile, err := os.Open(tmpStandardizedPath)
-	if err != nil {
-		return "", fmt.Errorf("open final video: %w", err)
-	}
-	defer finalVideoFile.Close()
-
-	fileName := fmt.Sprintf("%s_narration_01_video.mp4", narration.ChapterID)
-	uploadReq := &service.UploadFileRequest{
-		UserID:      narration.UserID,
-		FileName:    fileName,
-		ContentType: "video/mp4",
-		Ext:         "mp4",
-		Data:        finalVideoFile,
-	}
-
-	uploadResult, err := s.resourceService.UploadFile(ctx, uploadReq)
-	if err != nil {
-		return "", fmt.Errorf("upload video: %w", err)
-	}
-
-	// 11. 创建视频记录
-	videoID := id.New()
-	videoEntity := &novel.ChapterVideo{
-		ID:              videoID,
-		ChapterID:       narration.ChapterID,
-		NarrationID:     narration.ID,
-		UserID:          narration.UserID,
-		Sequence:        1,
-		VideoResourceID: uploadResult.ResourceID,
-		Duration:        audioDuration,
-		VideoType:       "narration_video",
-		Version:         version,
-		Status:          "completed",
-	}
-
-	if err := s.videoRepo.Create(ctx, videoEntity); err != nil {
-		return "", fmt.Errorf("create video record: %w", err)
-	}
-
-	return videoID, nil
+	return "", fmt.Errorf("generateNarration01Video is deprecated, use generateMergedNarrationVideo instead")
 }
 
 // replaceVideoAudio 替换视频的音频
@@ -600,12 +177,11 @@ func (s *novelService) replaceVideoAudio(ctx context.Context, videoPath, audioPa
 	return nil
 }
 
-// generateMergedNarrationVideo 生成合并的 narration_01-03 视频
+// generateMergedNarrationVideo 生成合并的视频（内部实现：前3个场景合并）
 // 对应 Python: create_merged_narration_video()
 // 逻辑：
-//   - 完全使用图生视频方式（image_01-03 按音频时长平均分配）
-//   - 不再依赖 first_video，统一使用 CreateImageVideo 生成视频
-//   - 合并 ASS 和 MP3 文件
+//   - 完全使用图生视频方式（每个场景的图片按对应音频时长生成视频）
+//   - 合并多个场景的视频、字幕和音频
 //   - 添加 BGM 和音效（可选）
 func (s *novelService) generateMergedNarrationVideo(
 	ctx context.Context,
@@ -622,7 +198,7 @@ func (s *novelService) generateMergedNarrationVideo(
 	ffmpegClient *ffmpeg.Client,
 ) (string, error) {
 	if len(shots) != 3 {
-		return "", fmt.Errorf("merged narration video requires exactly 3 shots, got %d", len(shots))
+		return "", fmt.Errorf("merged video requires exactly 3 shots, got %d", len(shots))
 	}
 
 	// 1. 获取前三个 Shots 的音频（sequence=1, 2, 3）
@@ -719,11 +295,20 @@ func (s *novelService) generateMergedNarrationVideo(
 	}()
 
 	// 3.1 使用 image_01-03 按音频时长分配（每个图片对应一个音频片段）
+	// 收集所有图片的 prompt（用于视频记录）
+	var imagePrompts []string
+	var images []*novel.ChapterImage
 	for i, shotInfo := range shots {
 		// 根据 scene_number 和 shot_number 查找图片
 		image, err := s.chapterImageRepo.FindBySceneAndShot(ctx, chapterID, shotInfo.SceneNumber, shotInfo.ShotNumber)
 		if err != nil {
 			return "", fmt.Errorf("find image for shot %d (scene=%s, shot=%s): %w", i+1, shotInfo.SceneNumber, shotInfo.ShotNumber, err)
+		}
+
+		// 保存图片引用和 prompt
+		images = append(images, image)
+		if image.Prompt != "" {
+			imagePrompts = append(imagePrompts, image.Prompt)
 		}
 
 		// 下载图片
@@ -865,6 +450,15 @@ func (s *novelService) generateMergedNarrationVideo(
 
 	// 11. 创建视频记录
 	videoID := id.New()
+
+	// 构建 prompt：合并所有图片的 prompt
+	var videoPrompt string
+	if len(imagePrompts) > 0 {
+		videoPrompt = strings.Join(imagePrompts, "; ")
+	} else {
+		videoPrompt = "图生视频（前3个场景合并）"
+	}
+
 	videoEntity := &novel.ChapterVideo{
 		ID:              videoID,
 		ChapterID:       chapterID,
@@ -874,6 +468,7 @@ func (s *novelService) generateMergedNarrationVideo(
 		VideoResourceID: uploadResult.ResourceID,
 		Duration:        totalAudioDuration,
 		VideoType:       "narration_video",
+		Prompt:          videoPrompt,
 		Version:         version,
 		Status:          "completed",
 	}
@@ -885,7 +480,7 @@ func (s *novelService) generateMergedNarrationVideo(
 	return videoID, nil
 }
 
-// generateSingleNarrationVideo 生成单个 narration 视频（narration_04-30，静态图片转视频）
+// generateSingleNarrationVideo 生成单个场景的视频（内部实现：第4个场景及之后每个单独生成）
 func (s *novelService) generateSingleNarrationVideo(
 	ctx context.Context,
 	chapterID string,
@@ -1073,6 +668,12 @@ func (s *novelService) generateSingleNarrationVideo(
 	existingVideos, _ := s.videoRepo.FindByChapterIDAndType(ctx, chapterID, "narration_video")
 	sequence := len(existingVideos) + 1
 
+	// 使用图片的 prompt 作为视频的 prompt
+	videoPrompt := image.Prompt
+	if videoPrompt == "" {
+		videoPrompt = fmt.Sprintf("图生视频（场景 %s，特写 %s）", shotInfo.SceneNumber, shotInfo.ShotNumber)
+	}
+
 	videoEntity := &novel.ChapterVideo{
 		ID:              videoID,
 		ChapterID:       chapterID,
@@ -1082,6 +683,7 @@ func (s *novelService) generateSingleNarrationVideo(
 		VideoResourceID: uploadResult.ResourceID,
 		Duration:        audioDuration,
 		VideoType:       "narration_video",
+		Prompt:          videoPrompt,
 		Version:         version,
 		Status:          "completed",
 	}
