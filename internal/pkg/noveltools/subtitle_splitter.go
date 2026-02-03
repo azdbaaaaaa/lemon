@@ -17,7 +17,7 @@ type SubtitleSplitter struct {
 // NewSubtitleSplitter 创建字幕文本分割器实例
 func NewSubtitleSplitter(maxLength int) *SubtitleSplitter {
 	if maxLength <= 0 {
-		maxLength = 12 // 默认值
+		maxLength = 20 // 默认值
 	}
 
 	// 初始化 gse 分词器
@@ -130,19 +130,29 @@ func (ss *SubtitleSplitter) splitLongSentenceNaturally(sentence string) []string
 
 		potentialSegment := currentSegment + word
 		cleanPotentialSegment := cleanSubtitleText(potentialSegment)
+		cleanCurrentSegment := cleanSubtitleText(currentSegment)
 
+		// 如果添加当前词后不超过 maxLength，直接添加
 		if len(cleanPotentialSegment) <= ss.maxLength {
 			currentSegment = potentialSegment
 		} else {
 			// 超出长度限制，需要断开
-			if currentSegment != "" {
+			// 但如果当前词很短（<=2个字符），且超过不多（<=maxLength+2），可以合并以保持词组完整
+			// 这样可以避免将 "真丝裙" 拆分成 "真丝" 和 "裙"
+			wordLen := len(cleanWord)
+			exceedLen := len(cleanPotentialSegment) - ss.maxLength
+
+			if wordLen <= 2 && exceedLen <= 2 && len(cleanCurrentSegment) > 0 {
+				// 允许稍微超过 maxLength 以保持词组完整（如 "真丝裙"）
+				currentSegment = potentialSegment
+			} else if currentSegment != "" {
 				// 尝试在当前段落中找到最佳断开位置
-				cleanCurrentSegment := cleanSubtitleText(currentSegment)
 				bestBreak := ss.findBestBreakPoint(cleanCurrentSegment, breakPoints)
 				if bestBreak != nil {
-					segments = append(segments, currentSegment)
-					currentSegment = word
+					segments = append(segments, bestBreak.before)
+					currentSegment = bestBreak.after + word
 				} else {
+					// 没有找到合适的断开位置，保存当前段落，开始新段落
 					segments = append(segments, currentSegment)
 					currentSegment = word
 				}
@@ -151,8 +161,9 @@ func (ss *SubtitleSplitter) splitLongSentenceNaturally(sentence string) []string
 			}
 
 			// 如果单个词过长，强制按字符分割
-			cleanCurrentSegment := cleanSubtitleText(currentSegment)
-			if len(cleanCurrentSegment) > ss.maxLength {
+			cleanCurrentSegmentAfter := cleanSubtitleText(currentSegment)
+			if len(cleanCurrentSegmentAfter) > ss.maxLength+3 {
+				// 如果超过太多（超过 maxLength+3），强制分割
 				charSegments := ss.splitByCharacters(currentSegment)
 				segments = append(segments, charSegments[:len(charSegments)-1]...)
 				if len(charSegments) > 0 {

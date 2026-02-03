@@ -54,14 +54,33 @@ func (s *novelService) GenerateSubtitlesForNarration(ctx context.Context, narrat
 		return nil, fmt.Errorf("failed to get next subtitle version: %w", err)
 	}
 
-	// 3. 获取该章节解说的所有章节音频记录（需要时间戳数据）
-	audios, err := s.audioRepo.FindByNarrationID(ctx, narrationID)
+	// 3. 获取该章节解说的最新版本的音频记录（需要时间戳数据）
+	// 先获取所有版本号，找到最新版本
+	audioVersions, err := s.audioRepo.FindVersionsByNarrationID(ctx, narrationID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find audio versions: %w", err)
+	}
+
+	if len(audioVersions) == 0 {
+		return nil, fmt.Errorf("no audio records found for narration %s, please generate audio first", narrationID)
+	}
+
+	// 找到最新版本号
+	maxAudioVersion := 0
+	for _, v := range audioVersions {
+		if v > maxAudioVersion {
+			maxAudioVersion = v
+		}
+	}
+
+	// 只获取最新版本的音频
+	audios, err := s.audioRepo.FindByNarrationIDAndVersion(ctx, narrationID, maxAudioVersion)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find audios: %w", err)
 	}
 
 	if len(audios) == 0 {
-		return nil, fmt.Errorf("no audio records found for narration %s, please generate audio first", narrationID)
+		return nil, fmt.Errorf("no audio records found for narration %s version %d, please generate audio first", narrationID, maxAudioVersion)
 	}
 
 	// 4. 从章节解说中提取所有文本
