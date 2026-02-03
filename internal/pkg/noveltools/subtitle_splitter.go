@@ -3,11 +3,14 @@ package noveltools
 import (
 	"regexp"
 	"strings"
+
+	"github.com/go-ego/gse"
 )
 
 // SubtitleSplitter 字幕文本分割器，用于将文本按自然方式分割为字幕段落
 type SubtitleSplitter struct {
-	maxLength int // 每段最大字符数（默认12）
+	maxLength int            // 每段最大字符数（默认12）
+	segmenter *gse.Segmenter // gse 分词器
 }
 
 // NewSubtitleSplitter 创建字幕文本分割器实例
@@ -15,8 +18,17 @@ func NewSubtitleSplitter(maxLength int) *SubtitleSplitter {
 	if maxLength <= 0 {
 		maxLength = 12 // 默认值
 	}
+
+	// 初始化 gse 分词器
+	segmenter, err := gse.New()
+	if err != nil {
+		// 如果初始化失败，使用空分词器（降级到字符分割）
+		segmenter = nil
+	}
+
 	return &SubtitleSplitter{
 		maxLength: maxLength,
+		segmenter: segmenter,
 	}
 }
 
@@ -72,6 +84,7 @@ func (ss *SubtitleSplitter) splitBySentenceEndings(text string, endings []rune) 
 }
 
 // splitLongSentenceNaturally 智能分割过长的句子
+// 使用 gse 分词按词边界分割，避免词组被裁断
 func (ss *SubtitleSplitter) splitLongSentenceNaturally(sentence string) []string {
 	// 定义自然断开位置的优先级（数字越小优先级越高）
 	breakPoints := map[rune]int{
@@ -95,30 +108,52 @@ func (ss *SubtitleSplitter) splitLongSentenceNaturally(sentence string) []string
 	segments := []string{}
 	currentSegment := ""
 
-	// 简单按字符分割（Go版本简化实现，不依赖jieba）
-	for _, char := range sentence {
-		potentialSegment := currentSegment + string(char)
+	// 使用 gse 分词获取词汇边界（参考 Python 版本的 jieba.cut）
+	var words []string
+	if ss.segmenter != nil {
+		// 使用 gse 分词
+		words = ss.segmenter.Cut(sentence, false)
+	} else {
+		// 降级：如果没有分词器，按字符分割
+		for _, char := range sentence {
+			words = append(words, string(char))
+		}
+	}
 
-		if len(potentialSegment) <= ss.maxLength {
+	for _, word := range words {
+		// 清理词（移除标点符号用于长度计算）
+		cleanWord := cleanSubtitleText(word)
+		if cleanWord == "" {
+			// 如果词只包含标点符号，直接添加到当前段落
+			currentSegment += word
+			continue
+		}
+
+		potentialSegment := currentSegment + word
+		cleanPotentialSegment := cleanSubtitleText(potentialSegment)
+
+		if len(cleanPotentialSegment) <= ss.maxLength {
 			currentSegment = potentialSegment
 		} else {
 			// 超出长度限制，需要断开
 			if currentSegment != "" {
 				// 尝试在当前段落中找到最佳断开位置
-				bestBreak := ss.findBestBreakPoint(currentSegment, breakPoints)
+				cleanCurrentSegment := cleanSubtitleText(currentSegment)
+				bestBreak := ss.findBestBreakPoint(cleanCurrentSegment, breakPoints)
 				if bestBreak != nil {
-					segments = append(segments, bestBreak.before)
-					currentSegment = bestBreak.after + string(char)
+					segments = append(segments, currentSegment)
+					currentSegment = word
 				} else {
 					segments = append(segments, currentSegment)
-					currentSegment = string(char)
+					currentSegment = word
 				}
 			} else {
-				currentSegment = string(char)
+				currentSegment = word
 			}
 
-			// 如果单个字符过长，强制按字符分割
-			if len(currentSegment) > ss.maxLength {
+			// 如果单个词过长，强制按字符分割
+			cleanCurrentSegment := cleanSubtitleText(currentSegment)
+			if len(cleanCurrentSegment) > ss.maxLength {
 				charSegments := ss.splitByCharacters(currentSegment)
 				segments = append(segments, charSegments[:len(charSegments)-1]...)
 				if len(charSegments) > 0 {
