@@ -64,7 +64,7 @@ type NarrationShot struct {
 	CloseupNumber string `json:"closeup_number" bson:"closeup_number"`                 // 特写编号
 	Character     string `json:"character,omitempty" bson:"character,omitempty"`       // 特写人物姓名
 	Narration     string `json:"narration" bson:"narration"`                           // 特写解说内容
-	ScenePrompt   string `json:"scene_prompt,omitempty" bson:"scene_prompt,omitempty"` // 图片prompt描述
+	ScenePrompt   string `json:"scene_prompt,omitempty" bson:"scene_prompt,omitempty"` // 图片prompt描述（包含场景描述+角色描述+行为/事件+构图词，用于生成包含人物和场景的完整画面）
 }
 
 // Collection 返回集合名称

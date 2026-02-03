@@ -103,6 +103,14 @@ func buildChapterNarrationPrompt(chapterContent string, chapterNum, totalChapter
 	b.WriteString("3. 使用第三人称口播风格，语言自然、口语化\n")
 	b.WriteString("4. 不要剧透后续章节，只围绕当前章节的内容\n\n")
 
+	b.WriteString("【图片描述（scene_prompt）要求】\n")
+	b.WriteString("1. 图片描述必须包含场景信息：室内/外场景的具体关键词、季节、天气等\n")
+	b.WriteString("2. 图片描述必须包含画面构图：镜头类型（特写/中景/远景）、光影、画面质量等\n")
+	b.WriteString("3. 图片描述应该由场景描述+角色描述+行为/事件+构图词组成\n")
+	b.WriteString("4. 图片描述不能包含文字相关的描述\n")
+	b.WriteString("5. 每个图片描述只能描述一个人物，禁止使用多人描述词汇\n")
+	b.WriteString("6. 古代背景设定：如果小说背景设定在古代，所有图片的风格必须统一设定为宋朝风格\n\n")
+
 	fmt.Fprintf(&b, "当前进度：第 %d 章 / 共 %d 章。\n\n", chapterNum, totalChapters)
 	b.WriteString("下面是本章节的原始内容：\n")
 	b.WriteString("---- BEGIN CHAPTER ----\n")
@@ -136,7 +144,7 @@ func buildChapterNarrationPrompt(chapterContent string, chapterNum, totalChapter
           "closeup_number": "1",
           "character": "特写人物姓名",
           "narration": "特写解说内容（30-32字）",
-          "scene_prompt": "图片prompt描述"
+          "scene_prompt": "场景描述（室内/外、季节、天气等）+ 角色描述 + 行为/事件 + 构图词（镜头类型、光影、画面质量等）"
         }
       ]
     }

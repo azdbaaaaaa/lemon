@@ -93,24 +93,10 @@ func TestMain(m *testing.M) {
 	fmt.Fprintf(os.Stderr, "[TestMain] KEEP_TEST_DATA 环境变量值: %q, keepTestData=%v\n", keepTestDataEnv, keepTestData)
 	testCleanup = func() {
 		if !keepTestData {
-			// 清理数据库集合（按顺序删除，避免依赖问题）
-			// 注意：删除集合不会删除数据库本身，但如果所有集合都被删除，MongoDB 可能会在下次访问时自动删除空数据库
-			collections := []string{
-				"chapter_images",     // 先删除图片
-				"chapter_subtitles",  // 删除章节字幕
-				"chapter_audios",     // 删除章节音频
-				"characters",         // 删除角色
-				"chapter_narrations", // 删除章节解说
-				"chapters",           // 删除章节
-				"novels",             // 删除小说
-				"upload_sessions",    // 删除上传会话
-				"resources",          // 最后删除资源
-			}
-			for _, collName := range collections {
-				if err := testDB.Collection(collName).Drop(testCtx); err != nil {
-					// 集合不存在时忽略错误
-					_ = err
-				}
+			// 直接删除整个数据库
+			if err := testDB.Drop(testCtx); err != nil {
+				// 数据库不存在时忽略错误
+				_ = err
 			}
 			// 清理存储文件
 			_ = os.RemoveAll(testStorageDir)
@@ -233,21 +219,10 @@ func setupTestEnvironment(t *testing.T) (context.Context, *mongo.Database, stora
 	// 清理函数
 	cleanup := func() {
 		if !keepTestData {
-			// 清理数据库集合（按顺序删除，避免依赖问题）
-			collections := []string{
-				"chapter_subtitles",
-				"chapter_audios",
-				"chapter_narrations",
-				"chapters",
-				"novels",
-				"upload_sessions",
-				"resources",
-			}
-			for _, collName := range collections {
-				if err := db.Collection(collName).Drop(ctx); err != nil {
-					// 集合不存在时忽略错误
-					_ = err
-				}
+			// 直接删除整个数据库
+			if err := db.Drop(ctx); err != nil {
+				// 数据库不存在时忽略错误
+				_ = err
 			}
 			// 清理存储文件
 			_ = os.RemoveAll(testStorageDir)
