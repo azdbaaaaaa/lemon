@@ -111,32 +111,18 @@ func (s *novelService) GenerateNarrationVideosForChapter(ctx context.Context, ch
 
 	var videoIDs []string
 
-	// 6. 为每个场景生成视频
-	// 内部实现：前3个场景合并成一个视频，其他场景每个单独生成视频
-	// 所有视频都使用图生视频方式
-	if len(allShots) >= 3 {
-		// 前3个场景合并成一个视频
-		mergedVideoID, err := s.generateMergedNarrationVideo(ctx, chapterID, narration, allShots[0:3], nil, videoVersion, ffmpegClient)
+	// 6. 为每个分镜生成视频
+	// 所有分镜都单独生成视频，使用图生视频方式
+	for i := 0; i < len(allShots) && i < 30; i++ {
+		shotInfo := allShots[i]
+		narrationNum := fmt.Sprintf("%02d", shotInfo.Index)
+
+		videoID, err := s.generateSingleNarrationVideo(ctx, chapterID, narration, shotInfo, narrationNum, videoVersion, ffmpegClient)
 		if err != nil {
-			log.Error().Err(err).Msg("生成合并视频失败（前3个场景）")
-		} else {
-			videoIDs = append(videoIDs, mergedVideoID)
+			log.Error().Err(err).Str("narration_num", narrationNum).Msg("生成分镜视频失败")
+			continue
 		}
-	}
-
-	// 其他场景每个单独生成视频
-	if len(allShots) > 3 {
-		for i := 3; i < len(allShots) && i < 30; i++ {
-			shotInfo := allShots[i]
-			narrationNum := fmt.Sprintf("%02d", shotInfo.Index)
-
-			videoID, err := s.generateSingleNarrationVideo(ctx, chapterID, narration, shotInfo, narrationNum, videoVersion, ffmpegClient)
-			if err != nil {
-				log.Error().Err(err).Str("narration_num", narrationNum).Msg("生成场景视频失败")
-				continue
-			}
-			videoIDs = append(videoIDs, videoID)
-		}
+		videoIDs = append(videoIDs, videoID)
 	}
 
 	return videoIDs, nil
@@ -718,9 +704,9 @@ func (s *novelService) generateSingleNarrationVideo(
 
 	// 12. 创建视频记录
 	videoID := id.New()
-	// 获取当前已生成的视频数量（用于 sequence）
-	existingVideos, _ := s.videoRepo.FindByChapterIDAndType(ctx, chapterID, "narration_video")
-	sequence := len(existingVideos) + 1
+	// 使用 shotInfo.Index 作为 sequence，确保与分镜顺序一致
+	// shotInfo.Index 是按照分镜顺序从 1 开始递增的（前 3 个分镜合并成一个视频，sequence=1）
+	sequence := shotInfo.Index
 
 	// videoPrompt 已经在前面（第 571 行）构建好了，这里直接使用
 
@@ -1208,32 +1194,99 @@ func buildVideoPromptFromImage(imagePrompt, scenePrompt, narration string) strin
 		return ""
 	}
 
-	// 构建视频动态效果描述
-	// 基于图片内容和场景描述，添加镜头运动、转场效果、动作描述
-	videoPrompt := "画面有明显的动态效果，镜头缓慢推进，人物有自然的动作和表情变化"
+	// 构建详细的视频动态效果描述
+	// 基于图片内容、场景描述和解说内容，生成更详细的动态效果描述
+	var promptParts []string
 
-	// 如果场景描述中包含动作关键词，增强动作描述
-	actionKeywords := []string{"走", "跑", "跳", "转身", "回头", "抬手", "挥手", "点头", "摇头", "转身", "移动", "前进", "后退"}
+	// 1. 基础动态效果
+	promptParts = append(promptParts, "画面有明显的动态效果")
+
+	// 2. 镜头运动描述
+	// 根据场景描述判断镜头类型
+	if strings.Contains(scenePrompt, "近景") || strings.Contains(imagePrompt, "近景") || strings.Contains(scenePrompt, "特写") || strings.Contains(imagePrompt, "特写") {
+		promptParts = append(promptParts, "镜头缓慢推进，聚焦人物细节")
+	} else if strings.Contains(scenePrompt, "远景") || strings.Contains(imagePrompt, "远景") {
+		promptParts = append(promptParts, "镜头缓慢拉远，展现全景")
+	} else if strings.Contains(scenePrompt, "中景") || strings.Contains(imagePrompt, "中景") {
+		promptParts = append(promptParts, "镜头平稳移动，保持中景构图")
+	} else {
+		promptParts = append(promptParts, "镜头缓慢推进，画面自然过渡")
+	}
+
+	// 3. 人物动作描述
+	actionKeywords := map[string]string{
+		"走":  "人物缓慢行走，步伐自然",
+		"跑":  "人物快速奔跑，动作幅度大",
+		"跳":  "人物跳跃动作，充满动感",
+		"转身": "人物缓缓转身，动作流畅",
+		"回头": "人物缓缓回头，眼神自然",
+		"抬手": "人物抬手动作，手势自然",
+		"挥手": "人物挥手示意，动作优雅",
+		"点头": "人物点头示意，表情自然",
+		"摇头": "人物摇头动作，表情生动",
+		"移动": "人物位置移动，画面动态",
+		"前进": "人物向前移动，步伐稳健",
+		"后退": "人物向后移动，动作自然",
+		"坐下": "人物坐下动作，姿态自然",
+		"站起": "人物站起动作，动作流畅",
+		"伸手": "人物伸手动作，手势自然",
+		"握拳": "人物握拳动作，充满力量",
+		"张开": "人物张开手臂，动作舒展",
+	}
+
 	hasAction := false
-	for _, keyword := range actionKeywords {
-		if strings.Contains(scenePrompt, keyword) || strings.Contains(imagePrompt, keyword) {
+	for keyword, actionDesc := range actionKeywords {
+		if strings.Contains(scenePrompt, keyword) || strings.Contains(imagePrompt, keyword) || strings.Contains(narration, keyword) {
+			promptParts = append(promptParts, actionDesc)
 			hasAction = true
 			break
 		}
 	}
 
-	if hasAction {
-		videoPrompt += "，动作幅度较大，画面流畅自然"
-	} else {
-		videoPrompt += "，背景有轻微的运动感，整体画面流畅自然"
+	// 4. 表情和情绪描述
+	emotionKeywords := map[string]string{
+		"笑":  "人物表情自然，面带微笑",
+		"哭":  "人物表情悲伤，情绪真实",
+		"怒":  "人物表情严肃，情绪强烈",
+		"惊":  "人物表情惊讶，反应自然",
+		"疑惑": "人物表情疑惑，眼神专注",
+		"思考": "人物表情沉思，神态自然",
+		"温柔": "人物表情温柔，神态柔和",
+		"坚定": "人物表情坚定，眼神有力",
 	}
 
-	// 如果解说内容中包含情绪或动作描述，增强动态效果
-	if strings.Contains(narration, "缓缓") || strings.Contains(narration, "慢慢") {
-		videoPrompt += "，镜头缓慢推进，画面过渡自然"
-	} else if strings.Contains(narration, "快速") || strings.Contains(narration, "迅速") {
-		videoPrompt += "，画面变化较快，动作流畅"
+	for keyword, emotionDesc := range emotionKeywords {
+		if strings.Contains(narration, keyword) || strings.Contains(scenePrompt, keyword) {
+			promptParts = append(promptParts, emotionDesc)
+			break
+		}
 	}
+
+	// 5. 背景和环境动态
+	if strings.Contains(scenePrompt, "风") || strings.Contains(imagePrompt, "风") || strings.Contains(narration, "风") {
+		promptParts = append(promptParts, "背景有风吹动，树叶或衣物轻微摆动")
+	} else if strings.Contains(scenePrompt, "雨") || strings.Contains(imagePrompt, "雨") || strings.Contains(narration, "雨") {
+		promptParts = append(promptParts, "背景有雨滴落下，画面湿润自然")
+	} else if strings.Contains(scenePrompt, "雪") || strings.Contains(imagePrompt, "雪") || strings.Contains(narration, "雪") {
+		promptParts = append(promptParts, "背景有雪花飘落，画面唯美")
+	} else if !hasAction {
+		promptParts = append(promptParts, "背景有轻微的运动感，光影自然变化")
+	}
+
+	// 6. 速度描述
+	if strings.Contains(narration, "缓缓") || strings.Contains(narration, "慢慢") || strings.Contains(narration, "缓慢") {
+		promptParts = append(promptParts, "整体节奏缓慢，画面过渡自然流畅")
+	} else if strings.Contains(narration, "快速") || strings.Contains(narration, "迅速") || strings.Contains(narration, "急速") {
+		promptParts = append(promptParts, "整体节奏较快，动作流畅有力")
+	} else {
+		promptParts = append(promptParts, "整体画面流畅自然，动作协调")
+	}
+
+	// 7. 画面质量
+	promptParts = append(promptParts, "画面清晰，细节丰富，动态效果自然")
+
+	// 组合所有部分
+	videoPrompt := strings.Join(promptParts, "，")
 
 	return videoPrompt
 }
