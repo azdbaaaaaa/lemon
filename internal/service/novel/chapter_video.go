@@ -304,7 +304,7 @@ func (s *novelService) generateSingleFirstVideo(
 // 逻辑：
 //   - 从 ChapterNarration.Content.Scenes[].Shots[] 中提取所有 Shots
 //   - 按照顺序编号为 narration_01, narration_02, narration_03, ...
-//   - narration_01-03: 合并成一个视频（前10秒使用 first_video，后面用 image_01-03 平均分配）
+//   - narration_01-03: 合并成一个视频（完全使用图生视频，image_01-03 按音频时长分配）
 //   - narration_04-30: 每个单独生成视频（静态图片转视频）
 func (s *novelService) GenerateNarrationVideosForChapter(ctx context.Context, chapterID string) ([]string, error) {
 	// 1. 获取章节的 narration
@@ -362,25 +362,12 @@ func (s *novelService) GenerateNarrationVideosForChapter(ctx context.Context, ch
 	// 5. 初始化 FFmpeg 客户端
 	ffmpegClient := ffmpeg.NewClient()
 
-	// 6. 获取前两张图片的视频（first_video）
-	firstVideos, err := s.videoRepo.FindByChapterIDAndType(ctx, chapterID, "first_video")
-	if err != nil {
-		return nil, fmt.Errorf("find first videos: %w", err)
-	}
-
-	var video1 *novel.ChapterVideo
-	for _, v := range firstVideos {
-		if v.Sequence == 1 && v.Status == "completed" {
-			video1 = v
-			break
-		}
-	}
-
 	var videoIDs []string
 
-	// 7. 处理 narration_01-03：合并成一个视频
+	// 6. 处理 narration_01-03：合并成一个视频（完全使用图生视频，不再依赖 first_video）
 	if len(allShots) >= 3 {
-		mergedVideoID, err := s.generateMergedNarrationVideo(ctx, chapterID, narration, allShots[0:3], video1, videoVersion, ffmpegClient)
+		// 统一使用图生视频，不再需要 first_video
+		mergedVideoID, err := s.generateMergedNarrationVideo(ctx, chapterID, narration, allShots[0:3], nil, videoVersion, ffmpegClient)
 		if err != nil {
 			log.Error().Err(err).Msg("生成合并 narration_01-03 视频失败")
 		} else {
@@ -388,7 +375,7 @@ func (s *novelService) GenerateNarrationVideosForChapter(ctx context.Context, ch
 		}
 	}
 
-	// 8. 处理 narration_04-30：每个单独生成视频
+	// 7. 处理 narration_04-30：每个单独生成视频
 	if len(allShots) > 3 {
 		for i := 3; i < len(allShots) && i < 30; i++ {
 			shotInfo := allShots[i]
@@ -614,8 +601,8 @@ func (s *novelService) replaceVideoAudio(ctx context.Context, videoPath, audioPa
 // generateMergedNarrationVideo 生成合并的 narration_01-03 视频
 // 对应 Python: create_merged_narration_video()
 // 逻辑：
-//   - 前10秒使用 first_video（video_1）
-//   - 后面时间用 image_01-03 平均分配（静态图片转视频）
+//   - 完全使用图生视频方式（image_01-03 按音频时长平均分配）
+//   - 不再依赖 first_video，统一使用 CreateImageVideo 生成视频
 //   - 合并 ASS 和 MP3 文件
 //   - 添加 BGM 和音效（可选）
 func (s *novelService) generateMergedNarrationVideo(
@@ -628,7 +615,7 @@ func (s *novelService) generateMergedNarrationVideo(
 		Shot        *novel.NarrationShot
 		Index       int
 	},
-	video1 *novel.ChapterVideo,
+	video1 *novel.ChapterVideo, // 保留参数以保持接口兼容，但不再使用
 	version int,
 	ffmpegClient *ffmpeg.Client,
 ) (string, error) {
@@ -654,7 +641,26 @@ func (s *novelService) generateMergedNarrationVideo(
 	// 计算总音频时长
 	var totalAudioDuration float64
 	for i := 0; i < 3; i++ {
-		totalAudioDuration += audios[i].Duration
+		audioDuration := audios[i].Duration
+		if audioDuration <= 0 {
+			// TODO: 修复音频 duration 为 0 的问题，确保 TTS API 返回的 duration 正确解析并保存到数据库
+			// 当前临时方案：如果音频时长为 0，使用默认值 10 秒
+			audioDuration = 10.0
+			log.Warn().
+				Str("narration_id", narration.ID).
+				Int("sequence", audios[i].Sequence).
+				Msg("音频 duration 为 0，使用默认值 10 秒")
+		}
+		totalAudioDuration += audioDuration
+	}
+
+	if totalAudioDuration <= 0 {
+		// TODO: 修复音频 duration 为 0 的问题，确保 TTS API 返回的 duration 正确解析并保存到数据库
+		// 当前临时方案：如果总时长为 0，使用默认值 30 秒（3个音频片段 × 10秒）
+		totalAudioDuration = 30.0
+		log.Warn().
+			Str("narration_id", narration.ID).
+			Msg("总音频 duration 为 0，使用默认值 30 秒")
 	}
 
 	// 2. 获取字幕文件（整体字幕，不是分段的）
@@ -663,7 +669,7 @@ func (s *novelService) generateMergedNarrationVideo(
 		return "", fmt.Errorf("find subtitle: %w", err)
 	}
 
-	// 3. 创建视频片段列表
+	// 3. 创建视频片段列表（完全使用图生视频）
 	tmpDir := os.TempDir()
 	var videoSegmentPaths []string
 	defer func() {
@@ -672,86 +678,56 @@ func (s *novelService) generateMergedNarrationVideo(
 		}
 	}()
 
-	// 3.1 前10秒使用 first_video（video_1）
-	if video1 != nil {
-		downloadReq := &service.DownloadFileRequest{
-			ResourceID: video1.VideoResourceID,
+	// 3.1 使用 image_01-03 按音频时长分配（每个图片对应一个音频片段）
+	for i, shotInfo := range shots {
+		// 根据 scene_number 和 shot_number 查找图片
+		image, err := s.chapterImageRepo.FindBySceneAndShot(ctx, chapterID, shotInfo.SceneNumber, shotInfo.ShotNumber)
+		if err != nil {
+			return "", fmt.Errorf("find image for shot %d (scene=%s, shot=%s): %w", i+1, shotInfo.SceneNumber, shotInfo.ShotNumber, err)
+		}
+
+		// 下载图片
+		imageDownloadReq := &service.DownloadFileRequest{
+			ResourceID: image.ImageResourceID,
 			UserID:     narration.UserID,
 		}
-		video1Result, err := s.resourceService.DownloadFile(ctx, downloadReq)
+		imageResult, err := s.resourceService.DownloadFile(ctx, imageDownloadReq)
 		if err != nil {
-			return "", fmt.Errorf("download video_1: %w", err)
+			return "", fmt.Errorf("download image %d: %w", i+1, err)
 		}
-		defer video1Result.Data.Close()
+		defer imageResult.Data.Close()
 
-		tmpVideo1Path := filepath.Join(tmpDir, fmt.Sprintf("video1_%s.mp4", id.New()))
-		video1File, err := os.Create(tmpVideo1Path)
+		tmpImagePath := filepath.Join(tmpDir, fmt.Sprintf("image_%d_%s.jpg", i+1, id.New()))
+		imageFile, err := os.Create(tmpImagePath)
 		if err != nil {
-			return "", fmt.Errorf("create temp video file: %w", err)
+			return "", fmt.Errorf("create temp image file: %w", err)
 		}
-		if _, err := io.Copy(video1File, video1Result.Data); err != nil {
-			video1File.Close()
-			return "", fmt.Errorf("copy video data: %w", err)
-		}
-		video1File.Close()
-
-		// 裁剪到10秒或总时长（取较小值）
-		firstVideoDuration := 10.0
-		if totalAudioDuration < 10.0 {
-			firstVideoDuration = totalAudioDuration
-		}
-
-		tmpCroppedVideo1Path := filepath.Join(tmpDir, fmt.Sprintf("video1_cropped_%s.mp4", id.New()))
-		if err := ffmpegClient.CropVideo(ctx, tmpVideo1Path, tmpCroppedVideo1Path, firstVideoDuration); err != nil {
-			return "", fmt.Errorf("crop video_1: %w", err)
-		}
-		videoSegmentPaths = append(videoSegmentPaths, tmpCroppedVideo1Path)
-		os.Remove(tmpVideo1Path) // 清理原始文件
-	}
-
-	// 3.2 后面时间用 image_01-03 平均分配（静态图片转视频）
-	if totalAudioDuration > 10.0 {
-		remainingDuration := totalAudioDuration - 10.0
-		imageDurationEach := remainingDuration / 3.0
-
-		for i, shotInfo := range shots {
-			// 根据 scene_number 和 shot_number 查找图片
-			image, err := s.chapterImageRepo.FindBySceneAndShot(ctx, chapterID, shotInfo.SceneNumber, shotInfo.ShotNumber)
-			if err != nil {
-				log.Warn().Err(err).Str("scene", shotInfo.SceneNumber).Str("shot", shotInfo.ShotNumber).Msg("图片未找到，跳过")
-				continue
-			}
-
-			// 下载图片
-			imageDownloadReq := &service.DownloadFileRequest{
-				ResourceID: image.ImageResourceID,
-				UserID:     narration.UserID,
-			}
-			imageResult, err := s.resourceService.DownloadFile(ctx, imageDownloadReq)
-			if err != nil {
-				return "", fmt.Errorf("download image %d: %w", i+1, err)
-			}
-			defer imageResult.Data.Close()
-
-			tmpImagePath := filepath.Join(tmpDir, fmt.Sprintf("image_%d_%s.jpg", i+1, id.New()))
-			imageFile, err := os.Create(tmpImagePath)
-			if err != nil {
-				return "", fmt.Errorf("create temp image file: %w", err)
-			}
-			if _, err := io.Copy(imageFile, imageResult.Data); err != nil {
-				imageFile.Close()
-				return "", fmt.Errorf("copy image data: %w", err)
-			}
+		if _, err := io.Copy(imageFile, imageResult.Data); err != nil {
 			imageFile.Close()
-
-			// 从图片创建视频
-			tmpImageVideoPath := filepath.Join(tmpDir, fmt.Sprintf("image_video_%d_%s.mp4", i+1, id.New()))
-			if err := ffmpegClient.CreateImageVideo(ctx, tmpImagePath, tmpImageVideoPath, imageDurationEach, 720, 1280, 30); err != nil {
-				return "", fmt.Errorf("create image video %d: %w", i+1, err)
-			}
-			videoSegmentPaths = append(videoSegmentPaths, tmpImageVideoPath)
-			os.Remove(tmpImagePath) // 清理图片文件
+			return "", fmt.Errorf("copy image data: %w", err)
 		}
+		imageFile.Close()
+
+		// 从图片创建视频（使用对应音频片段的时长）
+		// 注意：这里使用每个音频片段的实际时长，而不是平均分配
+		audioDuration := audios[i].Duration
+		if audioDuration <= 0 {
+			// TODO: 修复音频 duration 为 0 的问题，确保 TTS API 返回的 duration 正确解析并保存到数据库
+			// 当前临时方案：如果音频时长为 0，使用默认值 10 秒
+			audioDuration = 10.0
+			log.Warn().
+				Str("narration_id", narration.ID).
+				Int("sequence", audios[i].Sequence).
+				Int("shot_index", i+1).
+				Msg("音频 duration 为 0，使用默认值 10 秒")
+		}
+
+		tmpImageVideoPath := filepath.Join(tmpDir, fmt.Sprintf("image_video_%d_%s.mp4", i+1, id.New()))
+		if err := ffmpegClient.CreateImageVideo(ctx, tmpImagePath, tmpImageVideoPath, audioDuration, 720, 1280, 30); err != nil {
+			return "", fmt.Errorf("create image video %d: %w", i+1, err)
+		}
+		videoSegmentPaths = append(videoSegmentPaths, tmpImageVideoPath)
+		os.Remove(tmpImagePath) // 清理图片文件
 	}
 
 	if len(videoSegmentPaths) == 0 {
@@ -933,8 +909,15 @@ func (s *novelService) generateSingleNarrationVideo(
 	}
 
 	audioDuration := audio.Duration
-	if audioDuration == 0 {
-		return "", fmt.Errorf("audio duration is 0")
+	if audioDuration <= 0 {
+		// TODO: 修复音频 duration 为 0 的问题，确保 TTS API 返回的 duration 正确解析并保存到数据库
+		// 当前临时方案：如果音频时长为 0，使用默认值 10 秒
+		audioDuration = 10.0
+		log.Warn().
+			Str("narration_id", narration.ID).
+			Int("sequence", audio.Sequence).
+			Str("narration_num", narrationNum).
+			Msg("音频 duration 为 0，使用默认值 10 秒")
 	}
 
 	// 3. 下载图片

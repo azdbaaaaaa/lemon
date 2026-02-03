@@ -386,11 +386,20 @@ func (c *Client) MixAudio(ctx context.Context, videoPath string, bgmPath string,
 
 // CropVideo 裁剪视频时长
 func (c *Client) CropVideo(ctx context.Context, inputPath, outputPath string, duration float64) error {
+	// 注意：这里不能用 `-c copy`。
+	// 因为 `-t` + stream copy 在裁剪到很短时长（或未命中关键帧）时可能产出空文件，
+	// 进而导致后续 concat/add-subtitle 等步骤失败。
 	args := []string{
 		"-y",
 		"-i", inputPath,
 		"-t", fmt.Sprintf("%.2f", duration),
-		"-c", "copy", // 使用 copy 避免重新编码
+		"-map", "0:v:0",
+		"-an",
+		"-c:v", "libx264",
+		"-crf", "20",
+		"-preset", "veryfast",
+		"-pix_fmt", "yuv420p",
+		"-movflags", "+faststart",
 		outputPath,
 	}
 

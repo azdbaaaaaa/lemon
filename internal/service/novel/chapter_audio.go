@@ -162,7 +162,19 @@ func (s *novelService) generateSingleAudio(
 		})
 	}
 
-	// 7. 创建 chapter_audio 记录
+	// 7. 获取音频时长（如果 TTS API 返回的 duration 为 0，使用默认值 10 秒）
+	audioDuration := ttsResult.TimestampData.Duration
+	if audioDuration <= 0 {
+		// TODO: 修复 TTS API 返回字段解析问题，正确从 addition.duration 或 frontend 数据中提取真实时长
+		// 当前临时方案：如果解析失败，默认使用 10 秒
+		audioDuration = 10.0
+		log.Warn().
+			Str("narration_id", narration.ID).
+			Int("sequence", sequence).
+			Msg("TTS API 返回的 duration 为 0，使用默认值 10 秒")
+	}
+
+	// 8. 创建 chapter_audio 记录
 	audioID := id.New()
 	audioEntity := &novel.ChapterAudio{
 		ID:              audioID,
@@ -171,7 +183,7 @@ func (s *novelService) generateSingleAudio(
 		UserID:          narration.UserID,
 		Sequence:        sequence,
 		AudioResourceID: resourceID,
-		Duration:        ttsResult.TimestampData.Duration,
+		Duration:        audioDuration,
 		Text:            text,
 		Timestamps:      charTimes,
 		Prompt:          ttsPrompt,
