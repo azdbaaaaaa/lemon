@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/rs/zerolog/log"
 
@@ -451,10 +453,10 @@ func (s *novelService) generateNarration01Video(
 		return "", fmt.Errorf("crop video: %w", err)
 	}
 
-	// 5. 获取字幕文件
-	subtitle, err := s.subtitleRepo.FindByNarrationID(ctx, narration.ID)
+	// 5. 获取字幕文件（使用 sequence=1，对应 narration_01）
+	subtitle, err := s.subtitleRepo.FindByNarrationIDAndSequence(ctx, narration.ID, 1)
 	if err != nil {
-		return "", fmt.Errorf("find subtitle: %w", err)
+		return "", fmt.Errorf("find subtitle for sequence 1: %w", err)
 	}
 
 	// 下载字幕文件
@@ -663,14 +665,52 @@ func (s *novelService) generateMergedNarrationVideo(
 			Msg("总音频 duration 为 0，使用默认值 30 秒")
 	}
 
-	// 2. 获取字幕文件（整体字幕，不是分段的）
-	subtitle, err := s.subtitleRepo.FindByNarrationID(ctx, narration.ID)
-	if err != nil {
-		return "", fmt.Errorf("find subtitle: %w", err)
+	// 2. 创建临时目录
+	tmpDir := os.TempDir()
+
+	// 3. 下载前三个音频片段对应的字幕文件并合并
+	// 获取前三个音频片段的字幕
+	var subtitlePaths []string
+	for i := 0; i < 3; i++ {
+		subtitle, err := s.subtitleRepo.FindByNarrationIDAndSequence(ctx, narration.ID, audios[i].Sequence)
+		if err != nil {
+			return "", fmt.Errorf("find subtitle for sequence %d: %w", audios[i].Sequence, err)
+		}
+
+		// 下载字幕文件
+		subtitleDownloadReq := &service.DownloadFileRequest{
+			ResourceID: subtitle.SubtitleResourceID,
+			UserID:     narration.UserID,
+		}
+		subtitleResult, err := s.resourceService.DownloadFile(ctx, subtitleDownloadReq)
+		if err != nil {
+			return "", fmt.Errorf("download subtitle %d: %w", i+1, err)
+		}
+		defer subtitleResult.Data.Close()
+
+		// 保存字幕到临时文件
+		tmpSubtitlePath := filepath.Join(tmpDir, fmt.Sprintf("subtitle_%d_%s.ass", i+1, id.New()))
+		defer os.Remove(tmpSubtitlePath)
+		subtitleFile, err := os.Create(tmpSubtitlePath)
+		if err != nil {
+			return "", fmt.Errorf("create temp subtitle file %d: %w", i+1, err)
+		}
+		if _, err := io.Copy(subtitleFile, subtitleResult.Data); err != nil {
+			subtitleFile.Close()
+			return "", fmt.Errorf("copy subtitle data %d: %w", i+1, err)
+		}
+		subtitleFile.Close()
+		subtitlePaths = append(subtitlePaths, tmpSubtitlePath)
 	}
 
-	// 3. 创建视频片段列表（完全使用图生视频）
-	tmpDir := os.TempDir()
+	// 合并三个字幕文件（合并 ASS 文件的 Dialogue 事件）
+	tmpMergedSubtitlePath := filepath.Join(tmpDir, fmt.Sprintf("subtitle_merged_%s.ass", id.New()))
+	defer os.Remove(tmpMergedSubtitlePath)
+	if err := s.mergeASSFiles(ctx, subtitlePaths, tmpMergedSubtitlePath); err != nil {
+		return "", fmt.Errorf("merge ASS files: %w", err)
+	}
+
+	// 4. 创建视频片段列表（完全使用图生视频）
 	var videoSegmentPaths []string
 	defer func() {
 		for _, path := range videoSegmentPaths {
@@ -742,30 +782,7 @@ func (s *novelService) generateMergedNarrationVideo(
 		return "", fmt.Errorf("concat video segments: %w", err)
 	}
 
-	// 5. 下载字幕文件
-	subtitleDownloadReq := &service.DownloadFileRequest{
-		ResourceID: subtitle.SubtitleResourceID,
-		UserID:     narration.UserID,
-	}
-	subtitleResult, err := s.resourceService.DownloadFile(ctx, subtitleDownloadReq)
-	if err != nil {
-		return "", fmt.Errorf("download subtitle: %w", err)
-	}
-	defer subtitleResult.Data.Close()
-
-	tmpSubtitlePath := filepath.Join(tmpDir, fmt.Sprintf("subtitle_%s.ass", id.New()))
-	defer os.Remove(tmpSubtitlePath)
-	subtitleFile, err := os.Create(tmpSubtitlePath)
-	if err != nil {
-		return "", fmt.Errorf("create temp subtitle file: %w", err)
-	}
-	if _, err := io.Copy(subtitleFile, subtitleResult.Data); err != nil {
-		subtitleFile.Close()
-		return "", fmt.Errorf("copy subtitle data: %w", err)
-	}
-	subtitleFile.Close()
-
-	// 6. 合并前三个音频文件
+	// 5. 合并前三个音频文件
 	tmpMergedAudioPath := filepath.Join(tmpDir, fmt.Sprintf("merged_audio_%s.mp3", id.New()))
 	defer os.Remove(tmpMergedAudioPath)
 
@@ -805,7 +822,7 @@ func (s *novelService) generateMergedNarrationVideo(
 	tmpWithSubtitlePath := filepath.Join(tmpDir, fmt.Sprintf("video_subtitle_%s.mp4", id.New()))
 	defer os.Remove(tmpWithSubtitlePath)
 
-	if err := ffmpegClient.AddSubtitles(ctx, tmpMergedVideoPath, tmpSubtitlePath, tmpWithSubtitlePath); err != nil {
+	if err := ffmpegClient.AddSubtitles(ctx, tmpMergedVideoPath, tmpMergedSubtitlePath, tmpWithSubtitlePath); err != nil {
 		return "", fmt.Errorf("add subtitles: %w", err)
 	}
 
@@ -952,10 +969,10 @@ func (s *novelService) generateSingleNarrationVideo(
 		return "", fmt.Errorf("create image video: %w", err)
 	}
 
-	// 5. 获取字幕文件（整体字幕，不是分段的）
-	subtitle, err := s.subtitleRepo.FindByNarrationID(ctx, narration.ID)
+	// 5. 获取对应音频片段的字幕文件
+	subtitle, err := s.subtitleRepo.FindByNarrationIDAndSequence(ctx, narration.ID, audio.Sequence)
 	if err != nil {
-		return "", fmt.Errorf("find subtitle: %w", err)
+		return "", fmt.Errorf("find subtitle for sequence %d: %w", audio.Sequence, err)
 	}
 
 	// 下载字幕文件
@@ -969,6 +986,7 @@ func (s *novelService) generateSingleNarrationVideo(
 	}
 	defer subtitleResult.Data.Close()
 
+	// 保存字幕到临时文件
 	tmpSubtitlePath := filepath.Join(tmpDir, fmt.Sprintf("subtitle_%s.ass", id.New()))
 	defer os.Remove(tmpSubtitlePath)
 	subtitleFile, err := os.Create(tmpSubtitlePath)
@@ -1104,6 +1122,174 @@ func (s *novelService) mergeAudioFiles(ctx context.Context, audioPaths []string,
 	}
 
 	return nil
+}
+
+// mergeASSFiles 合并多个 ASS 字幕文件
+// 合并策略：保留第一个文件的头部信息，合并所有文件的 Dialogue 事件，并调整时间戳
+func (s *novelService) mergeASSFiles(ctx context.Context, assPaths []string, outputPath string) error {
+	if len(assPaths) == 0 {
+		return fmt.Errorf("no ASS files to merge")
+	}
+
+	// 读取第一个文件作为基础（包含头部信息）
+	firstContent, err := os.ReadFile(assPaths[0])
+	if err != nil {
+		return fmt.Errorf("read first ASS file: %w", err)
+	}
+
+	// 解析第一个文件，提取头部和 Dialogue 事件
+	firstLines := strings.Split(string(firstContent), "\n")
+	var headerLines []string
+	var firstDialogues []string
+	inEventsSection := false
+	for _, line := range firstLines {
+		if strings.HasPrefix(line, "[Events]") {
+			inEventsSection = true
+			headerLines = append(headerLines, line)
+			continue
+		}
+		if strings.HasPrefix(line, "Format:") {
+			headerLines = append(headerLines, line)
+			continue
+		}
+		if !inEventsSection {
+			headerLines = append(headerLines, line)
+		} else if strings.HasPrefix(line, "Dialogue:") {
+			firstDialogues = append(firstDialogues, line)
+		}
+	}
+
+	// 读取并解析其他文件的 Dialogue 事件
+	allDialogues := firstDialogues
+	var timeOffset float64
+
+	// 计算第一个文件的时长（从最后一个 Dialogue 事件的结束时间）
+	if len(firstDialogues) > 0 {
+		lastDialogue := firstDialogues[len(firstDialogues)-1]
+		// 解析时间戳：Dialogue: 0,Start,End,...
+		parts := strings.Split(lastDialogue, ",")
+		if len(parts) >= 3 {
+			// 解析结束时间
+			if endTime, err := parseASSTime(parts[2]); err == nil {
+				timeOffset = endTime
+			}
+		}
+	}
+
+	// 读取其他文件
+	for i := 1; i < len(assPaths); i++ {
+		content, err := os.ReadFile(assPaths[i])
+		if err != nil {
+			return fmt.Errorf("read ASS file %d: %w", i+1, err)
+		}
+
+		lines := strings.Split(string(content), "\n")
+		for _, line := range lines {
+			if strings.HasPrefix(line, "[Events]") {
+				continue
+			}
+			if strings.HasPrefix(line, "Dialogue:") {
+				// 调整时间戳：添加时间偏移
+				adjustedLine := adjustDialogueTime(line, timeOffset)
+				allDialogues = append(allDialogues, adjustedLine)
+			}
+		}
+
+		// 更新时间偏移（累加当前文件的时长）
+		if len(allDialogues) > 0 {
+			lastDialogue := allDialogues[len(allDialogues)-1]
+			parts := strings.Split(lastDialogue, ",")
+			if len(parts) >= 3 {
+				if endTime, err := parseASSTime(parts[2]); err == nil {
+					timeOffset = endTime
+				}
+			}
+		}
+	}
+
+	// 合并头部和所有 Dialogue 事件
+	mergedContent := strings.Join(headerLines, "\n")
+	if !strings.HasSuffix(mergedContent, "\n") {
+		mergedContent += "\n"
+	}
+	mergedContent += strings.Join(allDialogues, "\n") + "\n"
+
+	// 写入输出文件
+	if err := os.WriteFile(outputPath, []byte(mergedContent), 0644); err != nil {
+		return fmt.Errorf("write merged ASS file: %w", err)
+	}
+
+	return nil
+}
+
+// parseASSTime 解析 ASS 时间格式 (H:MM:SS:CC) 转换为秒数
+func parseASSTime(timeStr string) (float64, error) {
+	timeStr = strings.TrimSpace(timeStr)
+	lastColonIndex := strings.LastIndex(timeStr, ":")
+	if lastColonIndex > 0 {
+		timeStr = timeStr[:lastColonIndex] + "." + timeStr[lastColonIndex+1:]
+	}
+
+	parts := strings.Split(timeStr, ":")
+	if len(parts) != 3 {
+		return 0, fmt.Errorf("invalid time format: expected H:MM:SS.CC, got %s", timeStr)
+	}
+
+	hours, _ := strconv.Atoi(parts[0])
+	minutes, _ := strconv.Atoi(parts[1])
+	secondsParts := strings.Split(parts[2], ".")
+	if len(secondsParts) != 2 {
+		return 0, fmt.Errorf("invalid time format: expected SS.CC, got %s", parts[2])
+	}
+
+	seconds, _ := strconv.Atoi(secondsParts[0])
+	centiseconds, _ := strconv.Atoi(secondsParts[1])
+
+	totalSeconds := float64(hours*3600 + minutes*60 + seconds)
+	totalSeconds += float64(centiseconds) / 100.0
+
+	return totalSeconds, nil
+}
+
+// formatTimeForASS 将秒数转换为 ASS 时间格式 (H:MM:SS:CC)
+func formatTimeForASS(seconds float64) string {
+	hours := int(seconds / 3600)
+	minutes := int((int(seconds) % 3600) / 60)
+	secs := seconds - float64(hours*3600) - float64(minutes*60)
+	centiseconds := int((secs - float64(int(secs))) * 100)
+	return fmt.Sprintf("%d:%02d:%02d:%02d", hours, minutes, int(secs), centiseconds)
+}
+
+// adjustDialogueTime 调整 Dialogue 事件的时间戳（添加时间偏移）
+func adjustDialogueTime(dialogueLine string, timeOffset float64) string {
+	// Dialogue: 0,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
+	parts := strings.SplitN(dialogueLine, ",", 4)
+	if len(parts) < 4 {
+		return dialogueLine // 格式错误，返回原样
+	}
+
+	startTimeStr := parts[1]
+	endTimeStr := parts[2]
+	rest := parts[3]
+
+	// 解析并调整时间戳
+	startTime, err1 := parseASSTime(startTimeStr)
+	endTime, err2 := parseASSTime(endTimeStr)
+
+	if err1 != nil || err2 != nil {
+		return dialogueLine // 解析失败，返回原样
+	}
+
+	// 调整时间戳
+	newStartTime := startTime + timeOffset
+	newEndTime := endTime + timeOffset
+
+	// 格式化新的时间戳
+	newStartTimeStr := formatTimeForASS(newStartTime)
+	newEndTimeStr := formatTimeForASS(newEndTime)
+
+	// 重新构建 Dialogue 行
+	return fmt.Sprintf("Dialogue: %s,%s,%s,%s", parts[0], newStartTimeStr, newEndTimeStr, rest)
 }
 
 // GenerateFinalVideoForChapter 生成章节的最终完整视频

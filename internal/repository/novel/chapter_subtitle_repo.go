@@ -16,7 +16,8 @@ type ChapterSubtitleRepository interface {
 	Create(ctx context.Context, s *novel.ChapterSubtitle) error
 	FindByID(ctx context.Context, id string) (*novel.ChapterSubtitle, error)
 	FindByChapterID(ctx context.Context, chapterID string) (*novel.ChapterSubtitle, error)
-	FindByNarrationID(ctx context.Context, narrationID string) (*novel.ChapterSubtitle, error)
+	FindByNarrationID(ctx context.Context, narrationID string) ([]*novel.ChapterSubtitle, error)
+	FindByNarrationIDAndSequence(ctx context.Context, narrationID string, sequence int) (*novel.ChapterSubtitle, error)
 	FindByChapterIDAndVersion(ctx context.Context, chapterID string, version int) (*novel.ChapterSubtitle, error)
 	FindVersionsByChapterID(ctx context.Context, chapterID string) ([]int, error)
 	UpdateStatus(ctx context.Context, id string, status string) error
@@ -73,10 +74,31 @@ func (r *ChapterSubtitleRepo) FindByChapterID(ctx context.Context, chapterID str
 	return &s, nil
 }
 
-// FindByNarrationID 根据章节解说ID查询字幕（返回最新的未删除的）
-func (r *ChapterSubtitleRepo) FindByNarrationID(ctx context.Context, narrationID string) (*novel.ChapterSubtitle, error) {
-	var s novel.ChapterSubtitle
+// FindByNarrationID 根据章节解说ID查询所有字幕（按 sequence 排序）
+func (r *ChapterSubtitleRepo) FindByNarrationID(ctx context.Context, narrationID string) ([]*novel.ChapterSubtitle, error) {
 	filter := bson.M{"narration_id": narrationID, "deleted_at": nil}
+	opts := options.Find().SetSort(bson.M{"sequence": 1})
+	cur, err := r.coll.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+
+	var subtitles []*novel.ChapterSubtitle
+	for cur.Next(ctx) {
+		var s novel.ChapterSubtitle
+		if err := cur.Decode(&s); err != nil {
+			continue
+		}
+		subtitles = append(subtitles, &s)
+	}
+	return subtitles, nil
+}
+
+// FindByNarrationIDAndSequence 根据章节解说ID和序号查询字幕
+func (r *ChapterSubtitleRepo) FindByNarrationIDAndSequence(ctx context.Context, narrationID string, sequence int) (*novel.ChapterSubtitle, error) {
+	var s novel.ChapterSubtitle
+	filter := bson.M{"narration_id": narrationID, "sequence": sequence, "deleted_at": nil}
 	opts := options.FindOne().SetSort(bson.M{"created_at": -1})
 	if err := r.coll.FindOne(ctx, filter, opts).Decode(&s); err != nil {
 		return nil, err
