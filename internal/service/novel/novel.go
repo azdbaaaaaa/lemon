@@ -39,6 +39,7 @@ type novelService struct {
 	llmProvider      noveltools.LLMProvider
 	ttsProvider      noveltools.TTSProvider
 	imageProvider    noveltools.ImageProvider
+	videoProvider    noveltools.VideoProvider
 }
 
 // NewNovelService 创建小说服务
@@ -80,6 +81,13 @@ func NewNovelService(
 		return nil, fmt.Errorf("初始化 Image Provider 失败: %w", err)
 	}
 
+	// 初始化 Video Provider（从环境变量读取配置）
+	// 使用 Ark 视频生成
+	videoProvider, err := providers.NewArkVideoProvider()
+	if err != nil {
+		return nil, fmt.Errorf("初始化 Video Provider 失败: %w", err)
+	}
+
 	return &novelService{
 		resourceService:  resourceService,
 		novelRepo:        novelRepo,
@@ -93,5 +101,6 @@ func NewNovelService(
 		llmProvider:      llmProvider,
 		ttsProvider:      ttsProvider,
 		imageProvider:    imageProvider,
+		videoProvider:    videoProvider,
 	}, nil
 }

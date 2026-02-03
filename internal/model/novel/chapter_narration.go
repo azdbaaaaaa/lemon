@@ -13,13 +13,13 @@ import (
 // 说明：章节解说单独存储，通过 chapter_id 关联章节
 // Content 字段使用 NarrationContent 结构体存储结构化数据
 type ChapterNarration struct {
-	ID        string            `bson:"id" json:"id"`                               // 章节解说ID（UUID）
-	ChapterID string            `bson:"chapter_id" json:"chapter_id"`               // 关联的章节ID
-	UserID    string            `bson:"user_id" json:"user_id"`                     // 用户ID
-	Content   *NarrationContent `bson:"content" json:"content"`                     // 章节解说内容（结构化数据）
-	Prompt    string            `bson:"prompt,omitempty" json:"prompt,omitempty"`   // 生成章节解说时使用的提示词
-	Version   int               `bson:"version" json:"version"`                       // 版本号（用于支持多版本，默认 1）
-	Status    string            `bson:"status" json:"status"`                         // 状态：pending, completed, failed
+	ID        string            `bson:"id" json:"id"`                             // 章节解说ID（UUID）
+	ChapterID string            `bson:"chapter_id" json:"chapter_id"`             // 关联的章节ID
+	UserID    string            `bson:"user_id" json:"user_id"`                   // 用户ID
+	Content   *NarrationContent `bson:"content" json:"content"`                   // 章节解说内容（结构化数据）
+	Prompt    string            `bson:"prompt,omitempty" json:"prompt,omitempty"` // 生成章节解说时使用的提示词
+	Version   int               `bson:"version" json:"version"`                   // 版本号（用于支持多版本，默认 1）
+	Status    string            `bson:"status" json:"status"`                     // 状态：pending, completed, failed
 	CreatedAt time.Time         `bson:"created_at" json:"created_at"`
 	UpdatedAt time.Time         `bson:"updated_at" json:"updated_at"`
 	DeletedAt *time.Time        `bson:"deleted_at,omitempty" json:"deleted_at,omitempty"`
@@ -65,6 +65,7 @@ type NarrationShot struct {
 	Character     string `json:"character,omitempty" bson:"character,omitempty"`       // 特写人物姓名
 	Narration     string `json:"narration" bson:"narration"`                           // 特写解说内容
 	ScenePrompt   string `json:"scene_prompt,omitempty" bson:"scene_prompt,omitempty"` // 图片prompt描述（包含场景描述+角色描述+行为/事件+构图词，用于生成包含人物和场景的完整画面）
+	VideoPrompt   string `json:"video_prompt,omitempty" bson:"video_prompt,omitempty"` // 视频prompt描述（用于生成该镜头的动态视频，描述动态效果，例如"镜头缓慢推进，人物缓缓回头"、"树叶随风飘动，光影斑驳"等）
 }
 
 // Collection 返回集合名称

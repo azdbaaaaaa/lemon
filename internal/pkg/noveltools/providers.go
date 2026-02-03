@@ -55,6 +55,21 @@ type ImageProvider interface {
 	GenerateImage(ctx context.Context, prompt, filename string) ([]byte, error)
 }
 
+// VideoProvider 视频生成提供者接口
+// 统一抽象视频生成方式（如 Ark API）
+type VideoProvider interface {
+	// GenerateVideoFromImage 从图片生成视频
+	// Args:
+	//   - ctx: 上下文
+	//   - imageDataURL: 图片的 data URL（base64 编码）
+	//   - duration: 视频时长（秒，最大 12 秒）
+	//   - prompt: 视频生成提示词（描述动态效果）
+	// Returns:
+	//   - videoData: 视频二进制数据
+	//   - error: 错误信息
+	GenerateVideoFromImage(ctx context.Context, imageDataURL string, duration int, prompt string) ([]byte, error)
+}
+
 // TTSResult TTS生成结果
 type TTSResult struct {
 	Success       bool           `json:"success"`        // 是否成功

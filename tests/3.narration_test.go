@@ -26,7 +26,6 @@ func TestNovelService_GenerateNarrationText(t *testing.T) {
 		// 使用 TestMain 中初始化的全局变量
 		ctx := testCtx
 		services := testServices
-
 		userID := "test_user_novel_001"
 
 		// 步骤1: 查找或创建测试章节（优先使用数据库中已有的章节）

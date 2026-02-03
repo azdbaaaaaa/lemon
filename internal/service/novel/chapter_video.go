@@ -3,6 +3,7 @@ package novel
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"os"
@@ -556,15 +557,68 @@ func (s *novelService) generateSingleNarrationVideo(
 	}
 	imageFile.Close()
 
-	// 4. 从图片创建视频（带 Ken Burns 效果）
+	// 读取图片数据，转换为 base64 data URL
+	imageData, err := os.ReadFile(tmpImagePath)
+	if err != nil {
+		return "", fmt.Errorf("read image file: %w", err)
+	}
+	imageBase64 := base64.StdEncoding.EncodeToString(imageData)
+	imageDataURL := fmt.Sprintf("data:image/jpeg;base64,%s", imageBase64)
+
+	// 4. 构建视频 prompt
+	// 优先使用 shot.VideoPrompt（如果 LLM 生成了专门的视频 prompt）
+	// 如果没有，则基于图片 prompt 和场景描述构建
+	var videoPrompt string
+	if shotInfo.Shot.VideoPrompt != "" {
+		videoPrompt = shotInfo.Shot.VideoPrompt
+		log.Info().
+			Str("scene", shotInfo.SceneNumber).
+			Str("shot", shotInfo.ShotNumber).
+			Str("video_prompt", videoPrompt).
+			Msg("使用 LLM 生成的 video_prompt")
+	} else {
+		// 如果没有 video_prompt，基于图片 prompt 和场景描述构建
+		videoPrompt = buildVideoPromptFromImage(image.Prompt, shotInfo.Shot.ScenePrompt, shotInfo.Shot.Narration)
+		if videoPrompt == "" {
+			videoPrompt = "画面有明显的动态效果，镜头缓慢推进，人物有自然的动作和表情变化，背景有轻微的运动感，整体画面流畅自然"
+		}
+		log.Info().
+			Str("scene", shotInfo.SceneNumber).
+			Str("shot", shotInfo.ShotNumber).
+			Str("video_prompt", videoPrompt).
+			Msg("使用构建的 video_prompt")
+	}
+
+	// 5. 从图片创建视频
+	// 如果音频时长 <= 12 秒，使用 Ark API 生成视频（使用 videoPrompt）
+	// 如果音频时长 > 12 秒，使用 FFmpeg 从图片创建视频（Ken Burns 效果）
 	tmpVideoPath := filepath.Join(tmpDir, fmt.Sprintf("video_%s.mp4", id.New()))
 	defer os.Remove(tmpVideoPath)
 
-	if err := ffmpegClient.CreateImageVideo(ctx, tmpImagePath, tmpVideoPath, audioDuration, 720, 1280, 30); err != nil {
-		return "", fmt.Errorf("create image video: %w", err)
+	if audioDuration <= 12.0 {
+		// 使用 Ark API 生成视频（限制最大 12 秒）
+		limitedDuration := int(audioDuration)
+		videoData, err := s.videoProvider.GenerateVideoFromImage(ctx, imageDataURL, limitedDuration, videoPrompt)
+		if err != nil {
+			return "", fmt.Errorf("generate video from image: %w", err)
+		}
+
+		// 保存视频数据到临时文件
+		if err := os.WriteFile(tmpVideoPath, videoData, 0644); err != nil {
+			return "", fmt.Errorf("save video file: %w", err)
+		}
+	} else {
+		// 音频时长超过 12 秒，使用 FFmpeg 从图片创建视频（Ken Burns 效果）
+		// 参考 Python: create_image_video_with_effects
+		log.Info().
+			Float64("audio_duration", audioDuration).
+			Msg("音频时长超过 12 秒，使用 FFmpeg 从图片创建视频")
+		if err := ffmpegClient.CreateImageVideo(ctx, tmpImagePath, tmpVideoPath, audioDuration, 720, 1280, 30); err != nil {
+			return "", fmt.Errorf("create image video: %w", err)
+		}
 	}
 
-	// 5. 获取对应音频片段的字幕文件
+	// 6. 获取对应音频片段的字幕文件
 	subtitle, err := s.subtitleRepo.FindByNarrationIDAndSequence(ctx, narration.ID, audio.Sequence)
 	if err != nil {
 		return "", fmt.Errorf("find subtitle for sequence %d: %w", audio.Sequence, err)
@@ -594,7 +648,7 @@ func (s *novelService) generateSingleNarrationVideo(
 	}
 	subtitleFile.Close()
 
-	// 6. 添加字幕到视频
+	// 7. 添加字幕到视频
 	tmpWithSubtitlePath := filepath.Join(tmpDir, fmt.Sprintf("video_subtitle_%s.mp4", id.New()))
 	defer os.Remove(tmpWithSubtitlePath)
 
@@ -602,7 +656,7 @@ func (s *novelService) generateSingleNarrationVideo(
 		return "", fmt.Errorf("add subtitles: %w", err)
 	}
 
-	// 7. 下载音频文件
+	// 8. 下载音频文件
 	audioDownloadReq := &service.DownloadFileRequest{
 		ResourceID: audio.AudioResourceID,
 		UserID:     narration.UserID,
@@ -641,7 +695,7 @@ func (s *novelService) generateSingleNarrationVideo(
 		return "", fmt.Errorf("standardize video: %w", err)
 	}
 
-	// 10. 上传视频
+	// 11. 上传视频
 	finalVideoFile, err := os.Open(tmpStandardizedPath)
 	if err != nil {
 		return "", fmt.Errorf("open final video: %w", err)
@@ -662,17 +716,13 @@ func (s *novelService) generateSingleNarrationVideo(
 		return "", fmt.Errorf("upload video: %w", err)
 	}
 
-	// 11. 创建视频记录
+	// 12. 创建视频记录
 	videoID := id.New()
 	// 获取当前已生成的视频数量（用于 sequence）
 	existingVideos, _ := s.videoRepo.FindByChapterIDAndType(ctx, chapterID, "narration_video")
 	sequence := len(existingVideos) + 1
 
-	// 使用图片的 prompt 作为视频的 prompt
-	videoPrompt := image.Prompt
-	if videoPrompt == "" {
-		videoPrompt = fmt.Sprintf("图生视频（场景 %s，特写 %s）", shotInfo.SceneNumber, shotInfo.ShotNumber)
-	}
+	// videoPrompt 已经在前面（第 571 行）构建好了，这里直接使用
 
 	videoEntity := &novel.ChapterVideo{
 		ID:              videoID,
@@ -1143,4 +1193,47 @@ func (s *novelService) getFinishVideoPath() string {
 
 	// 如果默认路径不存在，返回空字符串（表示跳过 finish 视频）
 	return ""
+}
+
+// buildVideoPromptFromImage 基于图片 prompt 和场景描述构建视频动态效果 prompt
+// 添加镜头运动、转场效果、动作描述等，使生成的视频有更丰富的动态效果
+func buildVideoPromptFromImage(imagePrompt, scenePrompt, narration string) string {
+	// 如果图片 prompt 为空，使用场景 prompt
+	if imagePrompt == "" {
+		imagePrompt = scenePrompt
+	}
+
+	// 如果都为空，返回空字符串（调用方会使用默认 prompt）
+	if imagePrompt == "" {
+		return ""
+	}
+
+	// 构建视频动态效果描述
+	// 基于图片内容和场景描述，添加镜头运动、转场效果、动作描述
+	videoPrompt := "画面有明显的动态效果，镜头缓慢推进，人物有自然的动作和表情变化"
+
+	// 如果场景描述中包含动作关键词，增强动作描述
+	actionKeywords := []string{"走", "跑", "跳", "转身", "回头", "抬手", "挥手", "点头", "摇头", "转身", "移动", "前进", "后退"}
+	hasAction := false
+	for _, keyword := range actionKeywords {
+		if strings.Contains(scenePrompt, keyword) || strings.Contains(imagePrompt, keyword) {
+			hasAction = true
+			break
+		}
+	}
+
+	if hasAction {
+		videoPrompt += "，动作幅度较大，画面流畅自然"
+	} else {
+		videoPrompt += "，背景有轻微的运动感，整体画面流畅自然"
+	}
+
+	// 如果解说内容中包含情绪或动作描述，增强动态效果
+	if strings.Contains(narration, "缓缓") || strings.Contains(narration, "慢慢") {
+		videoPrompt += "，镜头缓慢推进，画面过渡自然"
+	} else if strings.Contains(narration, "快速") || strings.Contains(narration, "迅速") {
+		videoPrompt += "，画面变化较快，动作流畅"
+	}
+
+	return videoPrompt
 }

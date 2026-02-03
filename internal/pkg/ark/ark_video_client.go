@@ -107,8 +107,9 @@ func (c *ArkVideoClient) GenerateVideoFromImage(ctx context.Context, imageDataUR
 	}
 
 	// 构建提示词
+	// 如果 prompt 为空，使用更详细的默认 prompt，包含镜头运动、转场效果、动作描述
 	if prompt == "" {
-		prompt = "画面有明显的动态效果，动作大一些"
+		prompt = "画面有明显的动态效果，镜头缓慢推进，人物有自然的动作和表情变化，背景有轻微的运动感，整体画面流畅自然，动作幅度适中"
 	}
 
 	// 1. 提交任务（异步 API，只返回 task_id）

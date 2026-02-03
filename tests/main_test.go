@@ -33,7 +33,6 @@ import (
 	novelservice "lemon/internal/service/novel"
 
 	"lemon/internal/model/novel"
-	"lemon/internal/pkg/id"
 )
 
 // 包级别的测试环境变量（在 TestMain 中初始化）
@@ -313,28 +312,9 @@ func findOrCreateTestChapters(ctx context.Context, t *testing.T, services *TestS
 		cursor.Close(ctx)
 	}
 
-	// 2. 如果没有找到，则创建新的章节
-	t.Logf("未找到可用的章节，开始创建新章节...")
-	workflowID := id.New()
-	resourceID := findOrUploadTestFile(ctx, t, services, userID)
-
-	novelID, err := services.NovelService.CreateNovelFromResource(ctx, resourceID, userID, workflowID)
-	if err != nil {
-		t.Fatalf("创建小说失败: %v", err)
-	}
-
-	targetChapters := 5
-	err = services.NovelService.SplitNovelIntoChapters(ctx, novelID, targetChapters)
-	if err != nil {
-		t.Fatalf("切分章节失败: %v", err)
-	}
-
-	chapters, err := services.NovelService.GetChapters(ctx, novelID)
-	if err != nil {
-		t.Fatalf("查询章节失败: %v", err)
-	}
-
-	return novelID, chapters
+	// 2. 如果没有找到，直接退出测试
+	t.Fatal("未找到可用的章节，测试需要先运行前面的测试生成章节数据")
+	return "", nil // 不会执行到这里，但为了编译通过
 }
 
 // findOrCreateTestNarration 查找或创建测试章节解说
@@ -354,24 +334,9 @@ func findOrCreateTestNarration(ctx context.Context, t *testing.T, services *Test
 		return narrationEntity.ID, narrationEntity
 	}
 
-	// 3. 如果没有找到，尝试生成一个（需要 LLM Provider）
-	// 如果 TestMain 成功执行，LLMProvider 一定已初始化
-	// 4. 生成解说文案
-	narrationText, err := services.NovelService.GenerateNarrationForChapter(ctx, firstChapter.ID)
-	if err != nil {
-		t.Fatalf("生成解说文案失败: %v", err)
-	}
-	if narrationText == "" {
-		t.Fatal("生成的解说文案为空")
-	}
-
-	// 5. 再次查询，获取生成的解说文案
-	narrationEntity, err = services.NovelService.GetNarration(ctx, firstChapter.ID)
-	if err != nil {
-		t.Fatalf("查询生成的解说文案失败: %v", err)
-	}
-
-	return narrationEntity.ID, narrationEntity
+	// 3. 如果没有找到，直接退出测试
+	t.Fatal("未找到可用的章节解说，测试需要先运行前面的测试生成解说数据")
+	return "", nil // 不会执行到这里，但为了编译通过
 }
 
 // findOrUploadTestFile 查找或上传测试文件
