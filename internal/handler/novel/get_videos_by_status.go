@@ -4,6 +4,8 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+
+	"lemon/internal/model/novel"
 )
 
 // GetVideosByStatusRequest 根据状态查询视频请求
@@ -42,8 +44,11 @@ func (h *Handler) GetVideosByStatus(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
+	// 将字符串转换为枚举类型
+	status := novel.VideoStatus(req.Status)
+
 	// 调用Service层
-	videos, err := h.novelService.GetVideosByStatus(ctx, req.Status)
+	videos, err := h.novelService.GetVideosByStatus(ctx, status)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Code:    50001,

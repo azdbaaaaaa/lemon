@@ -17,11 +17,11 @@ type VideoRepository interface {
 	FindByID(ctx context.Context, id string) (*novel.Video, error)
 	FindByChapterID(ctx context.Context, chapterID string) ([]*novel.Video, error)
 	FindByNarrationID(ctx context.Context, narrationID string) ([]*novel.Video, error)
-	FindByChapterIDAndType(ctx context.Context, chapterID string, videoType string) ([]*novel.Video, error)
-	FindByStatus(ctx context.Context, status string) ([]*novel.Video, error) // 用于轮询
+	FindByChapterIDAndType(ctx context.Context, chapterID string, videoType novel.VideoType) ([]*novel.Video, error)
+	FindByStatus(ctx context.Context, status novel.VideoStatus) ([]*novel.Video, error) // 用于轮询
 	FindByChapterIDAndVersion(ctx context.Context, chapterID string, version int) ([]*novel.Video, error)
 	FindVersionsByChapterID(ctx context.Context, chapterID string) ([]int, error)
-	UpdateStatus(ctx context.Context, id string, status string, errorMsg string) error
+	UpdateStatus(ctx context.Context, id string, status novel.VideoStatus, errorMsg string) error
 	UpdateVideoResourceID(ctx context.Context, id string, resourceID string, duration float64, prompt string) error
 	UpdateVersion(ctx context.Context, id string, version int) error
 	Delete(ctx context.Context, id string) error
@@ -43,8 +43,8 @@ func (r *VideoRepo) Create(ctx context.Context, v *novel.Video) error {
 	now := time.Now()
 	v.CreatedAt = now
 	v.UpdatedAt = now
-	if v.Status == "" {
-		v.Status = "pending" // 默认状态为待处理
+	if v.Status == "" || v.Status == novel.VideoStatus("") {
+		v.Status = novel.VideoStatusPending // 默认状态为待处理
 	}
 	if v.Version == 0 {
 		v.Version = 1 // 默认版本为 1
@@ -97,7 +97,7 @@ func (r *VideoRepo) FindByNarrationID(ctx context.Context, narrationID string) (
 }
 
 // FindByChapterIDAndType 根据章节ID和视频类型查询视频
-func (r *VideoRepo) FindByChapterIDAndType(ctx context.Context, chapterID string, videoType string) ([]*novel.Video, error) {
+func (r *VideoRepo) FindByChapterIDAndType(ctx context.Context, chapterID string, videoType novel.VideoType) ([]*novel.Video, error) {
 	filter := bson.M{"chapter_id": chapterID, "video_type": videoType, "deleted_at": nil}
 	opts := options.Find().SetSort(bson.M{"sequence": 1})
 	cursor, err := r.coll.Find(ctx, filter, opts)
@@ -114,7 +114,7 @@ func (r *VideoRepo) FindByChapterIDAndType(ctx context.Context, chapterID string
 }
 
 // FindByStatus 根据状态查询视频（用于轮询）
-func (r *VideoRepo) FindByStatus(ctx context.Context, status string) ([]*novel.Video, error) {
+func (r *VideoRepo) FindByStatus(ctx context.Context, status novel.VideoStatus) ([]*novel.Video, error) {
 	filter := bson.M{"status": status, "deleted_at": nil}
 	opts := options.Find().SetSort(bson.M{"created_at": 1})
 	cursor, err := r.coll.Find(ctx, filter, opts)
@@ -181,7 +181,7 @@ func (r *VideoRepo) FindVersionsByChapterID(ctx context.Context, chapterID strin
 }
 
 // UpdateStatus 更新视频状态
-func (r *VideoRepo) UpdateStatus(ctx context.Context, id string, status string, errorMsg string) error {
+func (r *VideoRepo) UpdateStatus(ctx context.Context, id string, status novel.VideoStatus, errorMsg string) error {
 	update := bson.M{
 		"status":     status,
 		"updated_at": time.Now(),

@@ -56,19 +56,10 @@ func TestNovelService_GenerateVideo_Narration(t *testing.T) {
 
 		Convey("步骤3: 为章节生成所有 narration 视频", func() {
 			// 为章节生成所有 narration 视频
-			// 注意：这需要先有 first_video（前两张图片的视频）
-			// 如果 first_video 还在处理中，narration 视频生成可能会失败
-			// 这里先尝试生成，如果失败可以等待 first_video 完成后再重试
+			// 注意：现在所有视频都使用图生视频方式（Ark API 或 FFmpeg），不再需要 first_video
+			// 视频生成是异步的，提交任务后需要通过状态查询接口轮询进度
 
 			videoIDs, err := services.NovelService.GenerateNarrationVideosForChapter(ctx, chapterID)
-			if err != nil {
-				// 如果失败，可能是因为 first_video 还在处理中
-				// 等待一段时间后重试
-				t.Logf("首次生成 narration 视频失败（可能 first_video 还在处理中），等待 10 秒后重试...")
-				time.Sleep(10 * time.Second)
-				videoIDs, err = services.NovelService.GenerateNarrationVideosForChapter(ctx, chapterID)
-			}
-
 			So(err, ShouldBeNil)
 			So(len(videoIDs), ShouldBeGreaterThan, 0)
 
@@ -79,7 +70,7 @@ func TestNovelService_GenerateVideo_Narration(t *testing.T) {
 				// 可以进一步验证：
 				// 1. 视频文件已上传到 resource 模块
 				// 2. 视频记录已保存到数据库
-				// 3. 每个 narration shot 对应一个视频（narration_01-03 合并成一个）
+				// 3. 每个 narration shot 对应一个视频（所有分镜都单独生成视频）
 			})
 		})
 	})
@@ -183,7 +174,7 @@ func waitForVideosComplete(ctx context.Context, t *testing.T, services *TestServ
 			// 直接查询数据库获取视频状态
 			var videoModel novel.Video
 			videoColl := testDB.Collection(videoModel.Collection())
-			videoFilter := bson.M{"chapter_id": chapterID, "video_type": videoType, "deleted_at": nil}
+			videoFilter := bson.M{"chapter_id": chapterID, "video_type": string(videoType), "deleted_at": nil}
 			cursor, err := videoColl.Find(ctx, videoFilter, options.Find().SetSort(bson.M{"sequence": 1}))
 			if err != nil {
 				t.Logf("查询视频状态失败: %v", err)
@@ -206,10 +197,10 @@ func waitForVideosComplete(ctx context.Context, t *testing.T, services *TestServ
 			allCompleted := true
 			hasFailed := false
 			for _, video := range videos {
-				if video.Status == "failed" {
+				if video.Status == novel.VideoStatusFailed {
 					hasFailed = true
 					t.Logf("视频 %s 生成失败: %s", video.ID, video.ErrorMessage)
-				} else if video.Status != "completed" {
+				} else if video.Status != novel.VideoStatusCompleted {
 					allCompleted = false
 					t.Logf("视频 %s 状态: %s", video.ID, video.Status)
 				}

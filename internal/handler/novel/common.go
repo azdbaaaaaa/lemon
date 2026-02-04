@@ -37,10 +37,10 @@ func toVideoInfo(video *novel.Video) VideoInfo {
 		Sequence:        video.Sequence,
 		VideoResourceID: video.VideoResourceID,
 		Duration:        video.Duration,
-		VideoType:       video.VideoType,
+		VideoType:       string(video.VideoType),
 		Prompt:          video.Prompt,
 		Version:         video.Version,
-		Status:          video.Status,
+		Status:          string(video.Status),
 		CreatedAt:       video.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:       video.UpdatedAt.Format(time.RFC3339),
 	}
@@ -57,23 +57,29 @@ func toVideoInfoList(videos []*novel.Video) []VideoInfo {
 
 // NovelInfo 小说信息 DTO
 type NovelInfo struct {
-	ID         string `json:"id"`          // 小说ID
-	ResourceID string `json:"resource_id"` // 资源ID
-	UserID     string `json:"user_id"`     // 用户ID
-	WorkflowID string `json:"workflow_id"` // 工作流ID
-	CreatedAt  string `json:"created_at"`  // 创建时间
-	UpdatedAt  string `json:"updated_at"`  // 更新时间
+	ID          string `json:"id"`                    // 小说ID
+	ResourceID  string `json:"resource_id"`           // 资源ID
+	UserID      string `json:"user_id"`               // 用户ID
+	WorkflowID  string `json:"workflow_id"`           // 工作流ID
+	Title       string `json:"title,omitempty"`       // 小说名称
+	Author      string `json:"author,omitempty"`      // 作者
+	Description string `json:"description,omitempty"` // 简介
+	CreatedAt   string `json:"created_at"`            // 创建时间
+	UpdatedAt   string `json:"updated_at"`            // 更新时间
 }
 
 // toNovelInfo 将 Novel 实体转换为 NovelInfo DTO
 func toNovelInfo(novelEntity *novel.Novel) NovelInfo {
 	return NovelInfo{
-		ID:         novelEntity.ID,
-		ResourceID: novelEntity.ResourceID,
-		UserID:     novelEntity.UserID,
-		WorkflowID: novelEntity.WorkflowID,
-		CreatedAt:  novelEntity.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:  novelEntity.UpdatedAt.Format(time.RFC3339),
+		ID:          novelEntity.ID,
+		ResourceID:  novelEntity.ResourceID,
+		UserID:      novelEntity.UserID,
+		WorkflowID:  novelEntity.WorkflowID,
+		Title:       novelEntity.Title,
+		Author:      novelEntity.Author,
+		Description: novelEntity.Description,
+		CreatedAt:   novelEntity.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:   novelEntity.UpdatedAt.Format(time.RFC3339),
 	}
 }
 

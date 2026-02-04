@@ -44,9 +44,9 @@ func TestNovelService_GenerateImages(t *testing.T) {
 				// 可以进一步验证：
 				// 1. 图片文件已上传到 resource 模块
 				// 2. 图片记录已保存到数据库
-				// 3. 每个 NarrationShot 对应一张图片
-				// 注意：目前 NovelService 没有 GetChapterImage 方法，所以无法直接验证数据库记录
-				// 如果需要验证，可以添加 GetChapterImage 方法到 NovelService 接口
+				// 3. 每个 Shot 对应一张图片
+				// 注意：目前 NovelService 没有 GetImage 方法，所以无法直接验证数据库记录
+				// 如果需要验证，可以添加 GetImage 方法到 NovelService 接口
 			})
 		})
 	})

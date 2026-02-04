@@ -243,10 +243,10 @@ func (s *novelService) generateSingleSubtitle(
 		UserID:             narration.UserID,
 		Sequence:           sequence,
 		SubtitleResourceID: resourceID,
-		Format:             "ass",
+		Format:             novel.SubtitleFormatASS,
 		Prompt:             subtitlePrompt,
 		Version:            version,
-		Status:             "completed",
+		Status:             novel.TaskStatusCompleted,
 	}
 
 	if err := s.subtitleRepo.Create(ctx, subtitleEntity); err != nil {

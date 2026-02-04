@@ -18,6 +18,8 @@ import (
 	"testing"
 
 	. "github.com/smartystreets/goconvey/convey"
+
+	"lemon/internal/model/novel"
 )
 
 // TestNovelService_GenerateNarrationText 测试根据章节生成解说文案
@@ -46,7 +48,7 @@ func TestNovelService_GenerateNarrationText(t *testing.T) {
 				narrationEntity, err := services.NovelService.GetNarration(ctx, firstChapter.ID)
 				So(err, ShouldBeNil)
 				So(narrationEntity.ChapterID, ShouldEqual, firstChapter.ID)
-				So(narrationEntity.Status, ShouldEqual, "completed")
+				So(narrationEntity.Status, ShouldEqual, novel.TaskStatusCompleted)
 
 				// 验证场景和镜头已保存到独立的表中
 				// 注意：由于 Content 字段已移除，现在需要查询 Scene 和 Shot 表来验证数据

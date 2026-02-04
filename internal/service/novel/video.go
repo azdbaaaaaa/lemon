@@ -38,7 +38,7 @@ type VideoService interface {
 	GetVideoVersions(ctx context.Context, chapterID string) ([]int, error)
 
 	// GetVideosByStatus 根据状态查询视频（用于轮询）
-	GetVideosByStatus(ctx context.Context, status string) ([]*novel.Video, error)
+	GetVideosByStatus(ctx context.Context, status novel.VideoStatus) ([]*novel.Video, error)
 }
 
 // GenerateFirstVideosForChapter 已废弃：现在所有视频都使用图生视频方式，不再需要 first_video
@@ -508,10 +508,10 @@ func (s *novelService) generateMergedNarrationVideo(
 		Sequence:        1, // 合并视频的 sequence 为 1
 		VideoResourceID: uploadResult.ResourceID,
 		Duration:        totalAudioDuration,
-		VideoType:       "narration_video",
+		VideoType:       novel.VideoTypeNarration,
 		Prompt:          videoPrompt,
 		Version:         version,
-		Status:          "completed",
+		Status:          novel.VideoStatusCompleted,
 	}
 
 	if err := s.videoRepo.Create(ctx, videoEntity); err != nil {
@@ -874,10 +874,10 @@ func (s *novelService) generateSingleNarrationVideo(
 		Sequence:        sequence,
 		VideoResourceID: uploadResult.ResourceID,
 		Duration:        audioDuration,
-		VideoType:       "narration_video",
+		VideoType:       novel.VideoTypeNarration,
 		Prompt:          videoPrompt,
 		Version:         version,
-		Status:          "completed",
+		Status:          novel.VideoStatusCompleted,
 	}
 
 	if err := s.videoRepo.Create(ctx, videoEntity); err != nil {
@@ -1126,7 +1126,7 @@ func (s *novelService) GenerateFinalVideoForChapter(ctx context.Context, chapter
 	// 过滤出 narration_video 类型的视频
 	var filteredNarrationVideos []*novel.Video
 	for _, video := range narrationVideos {
-		if video.VideoType == "narration_video" {
+		if video.VideoType == novel.VideoTypeNarration {
 			filteredNarrationVideos = append(filteredNarrationVideos, video)
 		}
 	}
@@ -1281,9 +1281,9 @@ func (s *novelService) GenerateFinalVideoForChapter(ctx context.Context, chapter
 		Sequence:        1,
 		VideoResourceID: uploadResult.ResourceID,
 		Duration:        totalDuration,
-		VideoType:       "final_video",
+		VideoType:       novel.VideoTypeFinal,
 		Version:         videoVersion, // 使用与 narration 视频相同的版本号
-		Status:          "completed",
+		Status:          novel.VideoStatusCompleted,
 	}
 
 	if err := s.videoRepo.Create(ctx, videoEntity); err != nil {
@@ -1299,7 +1299,7 @@ func (s *novelService) GetVideoVersions(ctx context.Context, chapterID string) (
 }
 
 // GetVideosByStatus 根据状态查询视频（用于轮询）
-func (s *novelService) GetVideosByStatus(ctx context.Context, status string) ([]*novel.Video, error) {
+func (s *novelService) GetVideosByStatus(ctx context.Context, status novel.VideoStatus) ([]*novel.Video, error) {
 	return s.videoRepo.FindByStatus(ctx, status)
 }
 

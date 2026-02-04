@@ -20,7 +20,7 @@ type ImageRepository interface {
 	FindBySceneAndShot(ctx context.Context, chapterID, sceneNumber, shotNumber string) (*novel.Image, error)
 	FindByChapterIDAndVersion(ctx context.Context, chapterID string, version int) ([]*novel.Image, error)
 	FindVersionsByChapterID(ctx context.Context, chapterID string) ([]int, error)
-	UpdateStatus(ctx context.Context, id string, status string) error
+	UpdateStatus(ctx context.Context, id string, status novel.TaskStatus) error
 	Delete(ctx context.Context, id string) error
 }
 
@@ -153,7 +153,7 @@ func (r *ImageRepo) FindVersionsByChapterID(ctx context.Context, chapterID strin
 }
 
 // UpdateStatus 更新状态
-func (r *ImageRepo) UpdateStatus(ctx context.Context, id string, status string) error {
+func (r *ImageRepo) UpdateStatus(ctx context.Context, id string, status novel.TaskStatus) error {
 	_, err := r.coll.UpdateOne(
 		ctx,
 		bson.M{"id": id},

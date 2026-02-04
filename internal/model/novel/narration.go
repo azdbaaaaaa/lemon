@@ -19,7 +19,7 @@ type Narration struct {
 	UserID    string     `bson:"user_id" json:"user_id"`                   // 用户ID
 	Prompt    string     `bson:"prompt,omitempty" json:"prompt,omitempty"` // 生成解说时使用的提示词
 	Version   int        `bson:"version" json:"version"`                   // 版本号（用于支持多版本，默认 1）
-	Status    string     `bson:"status" json:"status"`                     // 状态：pending, completed, failed
+	Status    TaskStatus `bson:"status" json:"status"`                     // 状态：pending, completed, failed
 	CreatedAt time.Time  `bson:"created_at" json:"created_at"`
 	UpdatedAt time.Time  `bson:"updated_at" json:"updated_at"`
 	DeletedAt *time.Time `bson:"deleted_at,omitempty" json:"deleted_at,omitempty"`

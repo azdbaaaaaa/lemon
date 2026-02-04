@@ -19,10 +19,10 @@ type Video struct {
 	Sequence        int        `bson:"sequence" json:"sequence"`                               // 视频片段序号（从1开始）
 	VideoResourceID string     `bson:"video_resource_id" json:"video_resource_id"`             // 视频文件的 resource_id
 	Duration        float64    `bson:"duration" json:"duration"`                               // 视频时长（秒）
-	VideoType       string     `bson:"video_type" json:"video_type"`                           // 视频类型：narration_video, final_video
-	Prompt          string     `bson:"prompt,omitempty" json:"prompt,omitempty"`               // 生成视频时使用的提示词/参数
-	Version         int        `bson:"version" json:"version"`                                 // 版本号（用于支持多版本，默认 1）
-	Status          string     `bson:"status" json:"status"`                                   // 状态：pending, processing, completed, failed
+	VideoType       VideoType   `bson:"video_type" json:"video_type"`                           // 视频类型：narration_video, final_video
+	Prompt          string      `bson:"prompt,omitempty" json:"prompt,omitempty"`               // 生成视频时使用的提示词/参数
+	Version         int         `bson:"version" json:"version"`                                 // 版本号（用于支持多版本，默认 1）
+	Status          VideoStatus `bson:"status" json:"status"`                                   // 状态：pending, processing, completed, failed
 	ErrorMessage    string     `bson:"error_message,omitempty" json:"error_message,omitempty"` // 错误信息
 	CreatedAt       time.Time  `bson:"created_at" json:"created_at"`
 	UpdatedAt       time.Time  `bson:"updated_at" json:"updated_at"`

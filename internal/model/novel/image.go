@@ -26,7 +26,7 @@ type Image struct {
 	Prompt string `bson:"prompt,omitempty" json:"prompt,omitempty"` // 生成图片时使用的完整 prompt
 
 	Version  int    `bson:"version" json:"version"`   // 版本号（用于支持多版本，默认 1）
-	Status   string `bson:"status" json:"status"`     // 状态：pending, completed, failed
+	Status   TaskStatus `bson:"status" json:"status"`     // 状态：pending, completed, failed
 	Sequence int    `bson:"sequence" json:"sequence"` // 序号（用于排序，按场景和镜头编号排序）
 
 	CreatedAt time.Time  `bson:"created_at" json:"created_at"`

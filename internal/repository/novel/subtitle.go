@@ -20,7 +20,7 @@ type SubtitleRepository interface {
 	FindByNarrationIDAndSequence(ctx context.Context, narrationID string, sequence int) (*novel.Subtitle, error)
 	FindByChapterIDAndVersion(ctx context.Context, chapterID string, version int) (*novel.Subtitle, error)
 	FindVersionsByChapterID(ctx context.Context, chapterID string) ([]int, error)
-	UpdateStatus(ctx context.Context, id string, status string) error
+	UpdateStatus(ctx context.Context, id string, status novel.TaskStatus) error
 	UpdateVersion(ctx context.Context, id string, version int) error
 	Delete(ctx context.Context, id string) error
 }
@@ -41,11 +41,11 @@ func (r *SubtitleRepo) Create(ctx context.Context, s *novel.Subtitle) error {
 	now := time.Now()
 	s.CreatedAt = now
 	s.UpdatedAt = now
-	if s.Status == "" {
-		s.Status = "pending" // 默认状态为待处理
+	if s.Status == "" || s.Status == novel.TaskStatus("") {
+		s.Status = novel.TaskStatusPending // 默认状态为待处理
 	}
-	if s.Format == "" {
-		s.Format = "ass" // 默认格式为 ASS
+	if s.Format == "" || s.Format == novel.SubtitleFormat("") {
+		s.Format = novel.SubtitleFormatASS // 默认格式为 ASS
 	}
 	if s.Version == 0 {
 		s.Version = 1 // 默认版本为 1
@@ -151,7 +151,7 @@ func (r *SubtitleRepo) FindVersionsByChapterID(ctx context.Context, chapterID st
 }
 
 // UpdateStatus 更新字幕状态
-func (r *SubtitleRepo) UpdateStatus(ctx context.Context, id string, status string) error {
+func (r *SubtitleRepo) UpdateStatus(ctx context.Context, id string, status novel.TaskStatus) error {
 	_, err := r.coll.UpdateOne(
 		ctx,
 		bson.M{"id": id},

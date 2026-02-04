@@ -186,7 +186,7 @@ func (s *novelService) generateSingleImage(
 		CharacterName:   shot.Character,
 		Prompt:          completePrompt,
 		Version:         version, // 使用指定的版本号
-		Status:          "completed",
+		Status:          novel.TaskStatusCompleted,
 		Sequence:        sequence,
 	}
 

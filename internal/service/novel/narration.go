@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	"lemon/internal/model/novel"
-	"lemon/internal/pkg/id"
 	"lemon/internal/pkg/noveltools"
 )
 
@@ -48,7 +47,7 @@ func (s *novelService) GenerateNarrationForChapter(ctx context.Context, chapterI
 
 	generator := noveltools.NewNarrationGenerator(s.llmProvider)
 	// 传递章节字数，用于根据章节长度调整 prompt 要求
-	prompt, narrationText, err := generator.GenerateWithPrompt(ctx, ch.ChapterText, ch.Sequence, totalChapters, ch.WordCount)
+	_, narrationText, err := generator.GenerateWithPrompt(ctx, ch.ChapterText, ch.Sequence, totalChapters, ch.WordCount)
 	if err != nil {
 		return "", err
 	}
@@ -83,23 +82,9 @@ func (s *novelService) GenerateNarrationForChapter(ctx context.Context, chapterI
 		return "", fmt.Errorf("failed to get next version: %w", err)
 	}
 
-	// 保存到 narrations 表（不删除旧版本，支持多版本并存）
-	narrationID := id.New()
-	narrationEntity := &novel.Narration{
-		ID:        narrationID,
-		ChapterID: ch.ID,
-		UserID:    ch.UserID,
-		Prompt:    prompt,
-		Version:   nextVersion,
-		Status:    "completed",
-	}
-
-	if err := s.narrationRepo.Create(ctx, narrationEntity); err != nil {
-		return "", fmt.Errorf("failed to save narration: %w", err)
-	}
-
 	// 步骤3: 将场景和镜头转换为实体并保存到独立的表中
-	scenes, shots, err := noveltools.ConvertToScenesAndShots(narrationID, ch.ID, ch.UserID, nextVersion, jsonContent)
+	// 注意：不再使用 narrationID，改用 chapterID + version 作为批次标识
+	scenes, shots, err := noveltools.ConvertToScenesAndShots(ch.ID, ch.UserID, nextVersion, jsonContent)
 	if err != nil {
 		return "", fmt.Errorf("failed to convert scenes and shots: %w", err)
 	}
@@ -141,9 +126,9 @@ func (s *novelService) GenerateNarrationsForAllChapters(ctx context.Context, nov
 		go func(chapter *novel.Chapter) {
 			defer wg.Done()
 
-			generator := noveltools.NewNarrationGenerator(s.llmProvider)
-			// 传递章节字数，用于根据章节长度调整 prompt 要求
-			prompt, narrationText, err := generator.GenerateWithPrompt(ctx, chapter.ChapterText, chapter.Sequence, totalChapters, chapter.WordCount)
+		generator := noveltools.NewNarrationGenerator(s.llmProvider)
+		// 传递章节字数，用于根据章节长度调整 prompt 要求
+		_, narrationText, err := generator.GenerateWithPrompt(ctx, chapter.ChapterText, chapter.Sequence, totalChapters, chapter.WordCount)
 			if err != nil {
 				errCh <- fmt.Errorf("failed to generate narration for chapter %d: %w", chapter.Sequence, err)
 				return
@@ -183,24 +168,9 @@ func (s *novelService) GenerateNarrationsForAllChapters(ctx context.Context, nov
 				return
 			}
 
-			// 保存到 narrations 表（不删除旧版本，支持多版本并存）
-			narrationID := id.New()
-			narrationEntity := &novel.Narration{
-				ID:        narrationID,
-				ChapterID: chapter.ID,
-				UserID:    chapter.UserID,
-				Prompt:    prompt,
-				Version:   nextVersion,
-				Status:    "completed",
-			}
-
-			if err := s.narrationRepo.Create(ctx, narrationEntity); err != nil {
-				errCh <- fmt.Errorf("failed to save narration for chapter %d: %w", chapter.Sequence, err)
-				return
-			}
-
 			// 步骤3: 将场景和镜头转换为实体并保存到独立的表中
-			scenes, shots, err := noveltools.ConvertToScenesAndShots(narrationID, chapter.ID, chapter.UserID, nextVersion, jsonContent)
+			// 注意：不再使用 narrationID，改用 chapterID + version 作为批次标识
+			scenes, shots, err := noveltools.ConvertToScenesAndShots(chapter.ID, chapter.UserID, nextVersion, jsonContent)
 			if err != nil {
 				errCh <- fmt.Errorf("failed to convert scenes and shots for chapter %d: %w", chapter.Sequence, err)
 				return
@@ -255,8 +225,37 @@ func (s *novelService) SetNarrationVersion(ctx context.Context, narrationID stri
 }
 
 // GetNarrationVersions 获取章节的所有版本号
+// 注意：现在从 Scene 表中获取版本号，因为不再使用 Narration 表
 func (s *novelService) GetNarrationVersions(ctx context.Context, chapterID string) ([]int, error) {
-	return s.narrationRepo.FindVersionsByChapterID(ctx, chapterID)
+	scenes, err := s.sceneRepo.FindByChapterID(ctx, chapterID)
+	if err != nil {
+		return nil, err
+	}
+
+	// 收集所有唯一的版本号
+	versionSet := make(map[int]bool)
+	for _, scene := range scenes {
+		if scene.Version > 0 {
+			versionSet[scene.Version] = true
+		}
+	}
+
+	// 转换为切片并排序
+	versions := make([]int, 0, len(versionSet))
+	for v := range versionSet {
+		versions = append(versions, v)
+	}
+
+	// 简单排序（冒泡排序）
+	for i := 0; i < len(versions)-1; i++ {
+		for j := i + 1; j < len(versions); j++ {
+			if versions[i] > versions[j] {
+				versions[i], versions[j] = versions[j], versions[i]
+			}
+		}
+	}
+
+	return versions, nil
 }
 
 // GetAudioVersions 获取章节解说的所有音频版本号
@@ -289,20 +288,34 @@ func (s *novelService) getTotalChapters(ctx context.Context, novelID string) (in
 // getNextNarrationVersion 获取章节的下一个版本号（自动递增）
 // chapterID: 章节ID
 // 例如：如果已有 1, 2，则返回 3
+// 注意：现在从 Scene 表中获取版本号，因为不再使用 Narration 表
 func (s *novelService) getNextNarrationVersion(ctx context.Context, chapterID string) (int, error) {
-	versions, err := s.narrationRepo.FindVersionsByChapterID(ctx, chapterID)
+	// 从 Scene 表中获取所有版本号
+	scenes, err := s.sceneRepo.FindByChapterID(ctx, chapterID)
 	if err != nil {
-		// 如果没有找到任何版本，返回 1
+		// 如果没有找到任何场景，返回 1
 		return 1, nil
 	}
 
-	if len(versions) == 0 {
+	if len(scenes) == 0 {
+		return 1, nil
+	}
+
+	// 收集所有唯一的版本号
+	versionSet := make(map[int]bool)
+	for _, scene := range scenes {
+		if scene.Version > 0 {
+			versionSet[scene.Version] = true
+		}
+	}
+
+	if len(versionSet) == 0 {
 		return 1, nil
 	}
 
 	// 找到最大的版本号
 	maxVersion := 0
-	for _, v := range versions {
+	for v := range versionSet {
 		if v > maxVersion {
 			maxVersion = v
 		}

@@ -21,7 +21,6 @@ import (
 	"strings"
 	"testing"
 
-	. "github.com/smartystreets/goconvey/convey"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -193,7 +192,9 @@ func setupTestEnvironment(t *testing.T) (context.Context, *mongo.Database, stora
 	}
 
 	mongoClient, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
-	So(err, ShouldBeNil)
+	if err != nil {
+		t.Fatalf("Failed to connect to MongoDB: %v", err)
+	}
 
 	// 使用测试数据库
 	db := mongoClient.Database("lemon_test")
@@ -210,7 +211,9 @@ func setupTestEnvironment(t *testing.T) (context.Context, *mongo.Database, stora
 	}
 
 	testStorage, err := storagefactory.NewStorage(ctx, storageCfg)
-	So(err, ShouldBeNil)
+	if err != nil {
+		t.Fatalf("Failed to create storage: %v", err)
+	}
 
 	// 检查是否保留测试数据
 	keepTestData := os.Getenv("KEEP_TEST_DATA") == "true"
@@ -539,7 +542,7 @@ func requireTestFirstVideos(ctx context.Context, t *testing.T, chapterID string)
 func requireTestNarrationVideos(ctx context.Context, t *testing.T, chapterID string) {
 	var videoModel novel.Video
 	videoColl := testDB.Collection(videoModel.Collection())
-	videoFilter := bson.M{"chapter_id": chapterID, "video_type": "narration_video", "deleted_at": nil, "status": "completed"}
+	videoFilter := bson.M{"chapter_id": chapterID, "video_type": string(novel.VideoTypeNarration), "deleted_at": nil, "status": string(novel.VideoStatusCompleted)}
 	videoCount, err := videoColl.CountDocuments(ctx, videoFilter)
 	if err != nil {
 		t.Fatalf("测试失败：查询 narration_video 记录失败: %v", err)

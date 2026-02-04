@@ -23,7 +23,7 @@ type Audio struct {
 	Timestamps      []CharTime `bson:"timestamps" json:"timestamps"`               // 字符级别的时间戳
 	Prompt          string     `bson:"prompt,omitempty" json:"prompt,omitempty"`   // 生成音频时使用的提示词/参数（TTS参数配置）
 	Version         int        `bson:"version" json:"version"`                     // 版本号（用于支持多版本，默认 1）
-	Status          string     `bson:"status" json:"status"`                       // 状态：pending, completed, failed
+	Status          TaskStatus `bson:"status" json:"status"`                       // 状态：pending, completed, failed
 	CreatedAt       time.Time  `bson:"created_at" json:"created_at"`
 	UpdatedAt       time.Time  `bson:"updated_at" json:"updated_at"`
 	DeletedAt       *time.Time `bson:"deleted_at,omitempty" json:"deleted_at,omitempty"`

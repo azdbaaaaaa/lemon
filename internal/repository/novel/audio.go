@@ -20,7 +20,7 @@ type AudioRepository interface {
 	FindByNarrationIDAndVersion(ctx context.Context, narrationID string, version int) ([]*novel.Audio, error)
 	FindVersionsByNarrationID(ctx context.Context, narrationID string) ([]int, error)
 	FindVersionsByChapterID(ctx context.Context, chapterID string) ([]int, error)
-	UpdateStatus(ctx context.Context, id string, status string) error
+	UpdateStatus(ctx context.Context, id string, status novel.TaskStatus) error
 	UpdateVersion(ctx context.Context, id string, version int) error
 	Delete(ctx context.Context, id string) error
 }
@@ -41,8 +41,8 @@ func (r *AudioRepo) Create(ctx context.Context, a *novel.Audio) error {
 	now := time.Now()
 	a.CreatedAt = now
 	a.UpdatedAt = now
-	if a.Status == "" {
-		a.Status = "pending" // 默认状态为待处理
+	if a.Status == "" || a.Status == novel.TaskStatus("") {
+		a.Status = novel.TaskStatusPending // 默认状态为待处理
 	}
 	if a.Version == 0 {
 		a.Version = 1 // 默认版本为 1
@@ -178,7 +178,7 @@ func (r *AudioRepo) FindVersionsByChapterID(ctx context.Context, chapterID strin
 }
 
 // UpdateStatus 更新状态
-func (r *AudioRepo) UpdateStatus(ctx context.Context, id string, status string) error {
+func (r *AudioRepo) UpdateStatus(ctx context.Context, id string, status novel.TaskStatus) error {
 	_, err := r.coll.UpdateOne(
 		ctx,
 		bson.M{"id": id},

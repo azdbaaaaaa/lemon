@@ -54,34 +54,27 @@ func TestNovelService_Integration(t *testing.T) {
 		workflowID := id.New()
 
 		Convey("步骤1: 上传文件并创建资源", func() {
-			// 准备上传
-			prepareReq := &service.PrepareUploadRequest{
-				UserID:      userID,
-				FileName:    fileInfo.Name(),
-				FileSize:    fileInfo.Size(),
-				ContentType: "text/plain",
-				Ext:         "txt",
-			}
-
-			prepareResult, err := resourceService.PrepareUpload(ctx, prepareReq)
-			So(err, ShouldBeNil)
-			So(prepareResult.SessionID, ShouldNotBeEmpty)
-
-			// 上传文件内容到本地存储
+			// 使用服务端上传方式（UploadFile）
 			// 重置文件指针到开头
 			_, err = novelFile.Seek(0, 0)
 			So(err, ShouldBeNil)
-			_, err = testStorage.Upload(ctx, prepareResult.UploadKey, novelFile, "text/plain")
-			So(err, ShouldBeNil)
 
-			// 完成上传
-			completeReq := &service.CompleteUploadRequest{
-				SessionID: prepareResult.SessionID,
+			uploadReq := &service.UploadFileRequest{
+				UserID:      userID,
+				FileName:    fileInfo.Name(),
+				ContentType: "text/plain",
+				Ext:         "txt",
+				Data:        novelFile,
 			}
 
-			completeResult, err := resourceService.CompleteUpload(ctx, completeReq)
+			uploadResult, err := resourceService.UploadFile(ctx, uploadReq)
 			So(err, ShouldBeNil)
-			So(completeResult.ResourceID, ShouldNotBeEmpty)
+			So(uploadResult.ResourceID, ShouldNotBeEmpty)
+			So(uploadResult.FileSize, ShouldEqual, fileInfo.Size())
+
+			completeResult := &service.CompleteUploadResult{
+				ResourceID: uploadResult.ResourceID,
+			}
 
 			Convey("步骤2: 创建小说", func() {
 				novelID, err := novelService.CreateNovelFromResource(ctx, completeResult.ResourceID, userID, workflowID)

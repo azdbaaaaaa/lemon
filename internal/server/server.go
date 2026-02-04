@@ -227,6 +227,31 @@ func (s *Server) setupRoutes() {
 					v1.POST("/novels/:novel_id/chapters/split", novelHdl.SplitChapters)
 					v1.GET("/novels/:novel_id/chapters", novelHdl.GetChapters)
 
+					// 解说管理接口
+					v1.POST("/novels/chapters/:chapter_id/narration", novelHdl.GenerateNarration)
+					v1.POST("/novels/:novel_id/chapters/narration", novelHdl.GenerateNarrationsForAllChapters)
+					v1.GET("/novels/chapters/:chapter_id/narration", novelHdl.GetNarration)
+					v1.GET("/novels/chapters/:chapter_id/narration/version/:version", novelHdl.GetNarrationByVersion)
+					v1.GET("/novels/chapters/:chapter_id/narration/versions", novelHdl.GetNarrationVersions)
+					v1.PUT("/narrations/:narration_id/version", novelHdl.SetNarrationVersion)
+
+					// 音频生成接口
+					v1.POST("/narrations/:narration_id/audios", novelHdl.GenerateAudios)
+					v1.GET("/narrations/:narration_id/audios/versions", novelHdl.GetAudioVersions)
+
+					// 字幕生成接口
+					v1.POST("/narrations/:narration_id/subtitles", novelHdl.GenerateSubtitles)
+					v1.GET("/novels/chapters/:chapter_id/subtitles/versions", novelHdl.GetSubtitleVersions)
+
+					// 图片生成接口
+					v1.POST("/narrations/:narration_id/images", novelHdl.GenerateImages)
+					v1.GET("/novels/chapters/:chapter_id/images/versions", novelHdl.GetImageVersions)
+
+					// 角色管理接口
+					v1.POST("/novels/:novel_id/characters/sync", novelHdl.SyncCharacters)
+					v1.GET("/novels/:novel_id/characters", novelHdl.GetCharactersByNovelID)
+					v1.GET("/novels/:novel_id/characters/:name", novelHdl.GetCharacterByName)
+
 					// 视频生成接口
 					v1.POST("/novels/chapters/:chapter_id/videos/narration", novelHdl.GenerateNarrationVideos)
 					v1.POST("/novels/chapters/:chapter_id/videos/final", novelHdl.GenerateFinalVideo)

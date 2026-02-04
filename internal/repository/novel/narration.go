@@ -18,7 +18,7 @@ type NarrationRepository interface {
 	FindByChapterID(ctx context.Context, chapterID string) (*novel.Narration, error)
 	FindByChapterIDAndVersion(ctx context.Context, chapterID string, version int) (*novel.Narration, error)
 	FindVersionsByChapterID(ctx context.Context, chapterID string) ([]int, error)
-	UpdateStatus(ctx context.Context, id string, status string) error
+	UpdateStatus(ctx context.Context, id string, status novel.TaskStatus) error
 	UpdateVersion(ctx context.Context, id string, version int) error
 	Delete(ctx context.Context, id string) error
 }
@@ -39,8 +39,8 @@ func (r *NarrationRepo) Create(ctx context.Context, n *novel.Narration) error {
 	now := time.Now()
 	n.CreatedAt = now
 	n.UpdatedAt = now
-	if n.Status == "" {
-		n.Status = "completed" // 默认状态为已完成
+	if n.Status == "" || n.Status == novel.TaskStatus("") {
+		n.Status = novel.TaskStatusCompleted // 默认状态为已完成
 	}
 	if n.Version == 0 {
 		n.Version = 1 // 默认版本为 1
@@ -114,7 +114,7 @@ func (r *NarrationRepo) FindVersionsByChapterID(ctx context.Context, chapterID s
 }
 
 // UpdateStatus 更新解说状态
-func (r *NarrationRepo) UpdateStatus(ctx context.Context, id string, status string) error {
+func (r *NarrationRepo) UpdateStatus(ctx context.Context, id string, status novel.TaskStatus) error {
 	_, err := r.coll.UpdateOne(
 		ctx,
 		bson.M{"id": id},

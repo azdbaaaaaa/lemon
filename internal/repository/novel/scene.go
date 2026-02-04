@@ -40,8 +40,8 @@ func (r *SceneRepo) Create(ctx context.Context, scene *novel.Scene) error {
 	now := time.Now()
 	scene.CreatedAt = now
 	scene.UpdatedAt = now
-	if scene.Status == "" {
-		scene.Status = "completed"
+	if scene.Status == "" || scene.Status == novel.TaskStatus("") {
+		scene.Status = novel.TaskStatusCompleted
 	}
 	if scene.Version == 0 {
 		scene.Version = 1

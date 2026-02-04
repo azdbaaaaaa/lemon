@@ -20,6 +20,11 @@ type Novel struct {
 	// 关联上传的原始资源
 	ResourceID string `bson:"resource_id" json:"resource_id"`
 
+	// 小说元数据
+	Title       string `bson:"title,omitempty" json:"title,omitempty"`             // 小说名称
+	Author      string `bson:"author,omitempty" json:"author,omitempty"`           // 作者
+	Description string `bson:"description,omitempty" json:"description,omitempty"` // 简介
+
 	CreatedAt time.Time  `bson:"created_at" json:"created_at"`
 	UpdatedAt time.Time  `bson:"updated_at" json:"updated_at"`
 	DeletedAt *time.Time `bson:"deleted_at,omitempty" json:"deleted_at,omitempty"`

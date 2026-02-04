@@ -43,8 +43,8 @@ func (r *ShotRepo) Create(ctx context.Context, shot *novel.Shot) error {
 	now := time.Now()
 	shot.CreatedAt = now
 	shot.UpdatedAt = now
-	if shot.Status == "" {
-		shot.Status = "completed"
+	if shot.Status == "" || shot.Status == novel.TaskStatus("") {
+		shot.Status = novel.TaskStatusCompleted
 	}
 	if shot.Version == 0 {
 		shot.Version = 1

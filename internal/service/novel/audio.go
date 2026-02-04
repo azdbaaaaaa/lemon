@@ -179,7 +179,7 @@ func (s *novelService) generateSingleAudio(
 		Timestamps:      charTimes,
 		Prompt:          ttsPrompt,
 		Version:         version, // 使用指定的版本号
-		Status:          "completed",
+		Status:          novel.TaskStatusCompleted,
 	}
 
 	if err := s.audioRepo.Create(ctx, audioEntity); err != nil {

@@ -36,13 +36,18 @@ func TestNovelService_GenerateSubtitle(t *testing.T) {
 
 		Convey("步骤3: 为解说文案生成字幕", func() {
 			// 为解说文案生成字幕文件（ASS格式）
-			subtitleID, err := services.NovelService.GenerateSubtitlesForNarration(ctx, narrationID)
+			subtitleIDs, err := services.NovelService.GenerateSubtitlesForNarration(ctx, narrationID)
 			So(err, ShouldBeNil)
-			So(subtitleID, ShouldNotBeEmpty)
+			So(len(subtitleIDs), ShouldBeGreaterThan, 0)
 
 			Convey("验证字幕已保存到 subtitles 表", func() {
-				// 验证返回的 subtitleID 不为空
-				So(subtitleID, ShouldNotBeEmpty)
+				// 验证返回的 subtitleIDs 不为空
+				So(len(subtitleIDs), ShouldBeGreaterThan, 0)
+
+				// 验证每个字幕ID都不为空
+				for _, subtitleID := range subtitleIDs {
+					So(subtitleID, ShouldNotBeEmpty)
+				}
 
 				// 可以进一步验证：
 				// 1. 字幕文件已上传到 resource 模块

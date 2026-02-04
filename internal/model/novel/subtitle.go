@@ -18,10 +18,10 @@ type Subtitle struct {
 	UserID             string     `bson:"user_id" json:"user_id"`                           // 用户ID
 	Sequence           int        `bson:"sequence" json:"sequence"`                         // 序号（对应 shot 的顺序，从1开始）
 	SubtitleResourceID string     `bson:"subtitle_resource_id" json:"subtitle_resource_id"` // 字幕文件的 resource_id
-	Format             string     `bson:"format" json:"format"`                             // 字幕格式：ass, srt, vtt
-	Prompt             string     `bson:"prompt,omitempty" json:"prompt,omitempty"`         // 生成字幕时使用的提示词/参数（字幕生成参数配置）
-	Version            int        `bson:"version" json:"version"`                           // 版本号（用于支持多版本，默认 1）
-	Status             string     `bson:"status" json:"status"`                             // 状态：pending, completed, failed
+	Format             SubtitleFormat `bson:"format" json:"format"`                             // 字幕格式：ass, srt, vtt
+	Prompt             string         `bson:"prompt,omitempty" json:"prompt,omitempty"`         // 生成字幕时使用的提示词/参数（字幕生成参数配置）
+	Version            int            `bson:"version" json:"version"`                           // 版本号（用于支持多版本，默认 1）
+	Status             TaskStatus     `bson:"status" json:"status"`                             // 状态：pending, completed, failed
 	CreatedAt          time.Time  `bson:"created_at" json:"created_at"`
 	UpdatedAt          time.Time  `bson:"updated_at" json:"updated_at"`
 	DeletedAt          *time.Time `bson:"deleted_at,omitempty" json:"deleted_at,omitempty"`
