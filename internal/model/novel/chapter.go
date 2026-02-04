@@ -24,6 +24,11 @@ type Chapter struct {
 	ChapterText   string `bson:"chapter_text" json:"chapter_text"`                         // 章节全文
 	NarrationText string `bson:"narration_text,omitempty" json:"narration_text,omitempty"` // 单章节解说文本（生成后写入）
 
+	// 章节统计信息
+	TotalChars int `bson:"total_chars" json:"total_chars"` // 章节总字符数（中文字符，包括标点）
+	WordCount  int `bson:"word_count" json:"word_count"`   // 章节总字数（仅中文字符，不包括标点）
+	LineCount  int `bson:"line_count" json:"line_count"`   // 章节行数
+
 	CreatedAt time.Time  `bson:"created_at" json:"created_at"`
 	UpdatedAt time.Time  `bson:"updated_at" json:"updated_at"`
 	DeletedAt *time.Time `bson:"deleted_at,omitempty" json:"deleted_at,omitempty"`

@@ -173,6 +173,27 @@ func (s *novelService) generateSingleSubtitle(
 		return "", fmt.Errorf("failed to calculate segment timestamps, sequence=%d", sequence)
 	}
 
+	// 4.5. 根据音频时长调整字幕时间戳（确保字幕时长不超过音频时长）
+	// 参考 Python 版本：字幕时间戳应该基于音频的实际时长
+	audioDuration := audio.Duration
+	if audioDuration <= 0 {
+		// 如果音频时长为 0，尝试从时间戳数据中获取
+		if len(characterTimestamps) > 0 {
+			lastCharTime := characterTimestamps[len(characterTimestamps)-1]
+			audioDuration = lastCharTime.EndTime
+		}
+		if audioDuration <= 0 {
+			audioDuration = 10.0 // 默认值
+			log.Warn().
+				Str("narration_id", narration.ID).
+				Int("sequence", sequence).
+				Msg("音频 duration 为 0，使用默认值 10 秒")
+		}
+	}
+
+	// 调整字幕时间戳，确保不超过音频时长
+	segmentTimestamps = adjustSubtitleTimestampsToAudioDuration(segmentTimestamps, audioDuration)
+
 	// 5. 使用 ASSGenerator 生成 ASS 内容
 	assGenerator := noveltools.NewASSGenerator()
 	title := fmt.Sprintf("Narration Subtitle %d", sequence)
@@ -226,6 +247,56 @@ func (s *novelService) generateSingleSubtitle(
 	}
 
 	return subtitleID, nil
+}
+
+// adjustSubtitleTimestampsToAudioDuration 根据音频时长调整字幕时间戳
+// 确保字幕的最后一个时间戳不超过音频时长
+// 参考 Python 版本：字幕时间戳应该严格基于音频的实际时长
+func adjustSubtitleTimestampsToAudioDuration(segmentTimestamps []noveltools.SegmentTimestamp, audioDuration float64) []noveltools.SegmentTimestamp {
+	if len(segmentTimestamps) == 0 {
+		return segmentTimestamps
+	}
+
+	// 如果最后一个字幕的结束时间已经小于等于音频时长，不需要调整
+	lastEndTime := segmentTimestamps[len(segmentTimestamps)-1].EndTime
+	if lastEndTime <= audioDuration {
+		return segmentTimestamps
+	}
+
+	// 如果字幕总时长超过音频时长，需要按比例压缩
+	// 计算压缩比例
+	scaleFactor := audioDuration / lastEndTime
+
+	// 按比例压缩所有时间戳
+	adjusted := make([]noveltools.SegmentTimestamp, len(segmentTimestamps))
+	for i, seg := range segmentTimestamps {
+		adjusted[i] = noveltools.SegmentTimestamp{
+			Text:      seg.Text,
+			StartTime: seg.StartTime * scaleFactor,
+			EndTime:   seg.EndTime * scaleFactor,
+		}
+	}
+
+	// 确保最后一个字幕的结束时间正好等于音频时长（避免浮点数误差）
+	if len(adjusted) > 0 {
+		adjusted[len(adjusted)-1].EndTime = audioDuration
+		// 确保最后一个字幕的开始时间不超过结束时间
+		if adjusted[len(adjusted)-1].StartTime >= adjusted[len(adjusted)-1].EndTime {
+			adjusted[len(adjusted)-1].StartTime = adjusted[len(adjusted)-1].EndTime - 0.5
+			if adjusted[len(adjusted)-1].StartTime < 0 {
+				adjusted[len(adjusted)-1].StartTime = 0
+			}
+		}
+	}
+
+	log.Info().
+		Float64("original_last_time", lastEndTime).
+		Float64("audio_duration", audioDuration).
+		Float64("scale_factor", scaleFactor).
+		Float64("adjusted_last_time", adjusted[len(adjusted)-1].EndTime).
+		Msg("字幕时间戳已根据音频时长调整")
+
+	return adjusted
 }
 
 // getNextSubtitleVersion 获取章节的下一个字幕版本号（自动递增）

@@ -56,6 +56,7 @@ func (ng *NarrationGenerator) Generate(
 //   - chapterContent: 章节原始内容
 //   - chapterNum: 当前章节编号（从 1 开始）
 //   - totalChapters: 总章节数
+//   - chapterWordCount: 章节字数（可选，用于调整 prompt 要求）
 //
 // Returns:
 //   - prompt: 使用的提示词
@@ -66,6 +67,7 @@ func (ng *NarrationGenerator) GenerateWithPrompt(
 	chapterContent string,
 	chapterNum int,
 	totalChapters int,
+	chapterWordCount ...int,
 ) (string, string, error) {
 	if ng.llmProvider == nil {
 		return "", "", fmt.Errorf("llmProvider is required")
@@ -78,14 +80,20 @@ func (ng *NarrationGenerator) GenerateWithPrompt(
 		return "", "", fmt.Errorf("invalid chapter number or totalChapters")
 	}
 
-	prompt := buildChapterNarrationPrompt(chapterContent, chapterNum, totalChapters)
+	var wordCount int
+	if len(chapterWordCount) > 0 {
+		wordCount = chapterWordCount[0]
+	}
+
+	prompt := buildChapterNarrationPrompt(chapterContent, chapterNum, totalChapters, wordCount)
 	narration, err := ng.llmProvider.Generate(ctx, prompt)
 	return prompt, narration, err
 }
 
 // buildChapterNarrationPrompt 构造章节解说的提示词
 // 要求生成 JSON 格式的结构化数据
-func buildChapterNarrationPrompt(chapterContent string, chapterNum, totalChapters int) string {
+// chapterWordCount: 章节字数（可选），用于根据章节长度调整 prompt 要求
+func buildChapterNarrationPrompt(chapterContent string, chapterNum, totalChapters int, chapterWordCount int) string {
 	var b strings.Builder
 	b.WriteString("你是一名专业的中文小说解说文案撰写助手。\n")
 	b.WriteString("请基于下面给出的章节内容，生成适合短视频解说的结构化解说文案。\n\n")
@@ -95,18 +103,45 @@ func buildChapterNarrationPrompt(chapterContent string, chapterNum, totalChapter
 	b.WriteString("2. 不要使用 markdown 代码块标记（不要使用 ```json 或 ```）\n")
 	b.WriteString("3. 不要添加任何解释、说明或注释\n")
 	b.WriteString("4. 直接以 { 开头，以 } 结尾\n")
-	b.WriteString("5. 确保 JSON 格式完全正确，可以直接被 JSON 解析器解析\n\n")
+	b.WriteString("5. 确保 JSON 格式完全正确，可以直接被 JSON 解析器解析\n")
+	b.WriteString("6. **严格禁止在数组或对象的最后一个元素后添加逗号**（例如：不要写成 [1, 2, 3,] 或 {\"key\": \"value\",}）\n")
+	b.WriteString("7. 确保所有字符串值都使用双引号，不要使用单引号\n")
+	b.WriteString("8. 确保所有键名都使用双引号\n")
+	b.WriteString("9. 不要在 JSON 中添加注释（JSON 不支持注释）\n\n")
 
 	b.WriteString("【内容要求】\n")
-	b.WriteString("1. 必须生成至少7个分镜，每个分镜包含解说内容和图片描述\n")
-	b.WriteString("2. 解说内容总字数必须达到1100-1300字（中文字符）\n")
-	b.WriteString("3. 使用第三人称口播风格，语言自然、口语化\n")
-	b.WriteString("4. 不要剧透后续章节，只围绕当前章节的内容\n\n")
+	b.WriteString("1. 必须生成7个场景（scene），每个场景包含1-3个分镜头（shot）\n")
+	b.WriteString("2. 每个分镜头必须包含：解说内容（narration）、图片描述（scene_prompt）、视频描述（video_prompt）\n")
+
+	// 根据章节长度调整字数要求
+	if chapterWordCount > 0 {
+		// 根据章节字数动态调整解说字数要求（约为章节字数的 10-15%）
+		minNarrationWords := chapterWordCount / 10
+		maxNarrationWords := chapterWordCount * 15 / 100
+		if minNarrationWords < 800 {
+			minNarrationWords = 800
+		}
+		if maxNarrationWords < 1000 {
+			maxNarrationWords = 1000
+		}
+		if minNarrationWords > 1500 {
+			minNarrationWords = 1500
+		}
+		if maxNarrationWords > 2000 {
+			maxNarrationWords = 2000
+		}
+		fmt.Fprintf(&b, "3. 解说内容总字数必须达到%d-%d字（中文字符，根据章节长度%d字调整）\n", minNarrationWords, maxNarrationWords, chapterWordCount)
+	} else {
+		b.WriteString("3. 解说内容总字数必须达到1100-1300字（中文字符）\n")
+	}
+
+	b.WriteString("4. 使用第三人称口播风格，语言自然、口语化\n")
+	b.WriteString("5. 不要剧透后续章节，只围绕当前章节的内容\n\n")
 
 	b.WriteString("【解说内容（narration）要求】\n")
-	b.WriteString("1. 每个分镜的解说内容必须完整自然，能够独立成段，包含足够的信息量\n")
+	b.WriteString("1. 每个分镜头的解说内容必须完整自然，能够独立成段，包含足够的信息量\n")
 	b.WriteString("2. 解说内容应该只包含小说情节、对话、人物心理活动、事件描述等故事内容\n")
-	b.WriteString("3. 每个特写的解说内容应该详细描述该特写对应的情节片段，包括：\n")
+	b.WriteString("3. 每个分镜头的解说内容应该详细描述该分镜头对应的情节片段，包括：\n")
 	b.WriteString("   - 人物的动作、表情、心理活动\n")
 	b.WriteString("   - 对话内容（如果有）\n")
 	b.WriteString("   - 情节的发展和转折\n")
@@ -127,14 +162,18 @@ func buildChapterNarrationPrompt(chapterContent string, chapterNum, totalChapter
 	b.WriteString("6. 古代背景设定：如果小说背景设定在古代，所有图片的风格必须统一设定为宋朝风格\n\n")
 
 	b.WriteString("【视频描述（video_prompt）要求】\n")
-	b.WriteString("1. 每个特写必须包含一个 video_prompt 字段，用于生成该镜头的动态视频\n")
-	b.WriteString("2. video_prompt 应描述该镜头的动态效果，例如：\n")
-	b.WriteString("   - \"镜头缓慢推进，人物缓缓回头\"\n")
-	b.WriteString("   - \"树叶随风飘动，光影斑驳\"\n")
-	b.WriteString("   - \"画面有明显的动态效果，人物有自然的动作和表情变化\"\n")
-	b.WriteString("   - \"镜头缓慢拉远，背景有轻微的运动感\"\n")
-	b.WriteString("3. video_prompt 应该描述镜头运动、人物动作、画面变化等动态效果\n")
-	b.WriteString("4. 如果没有明确的动态效果需求，可以使用默认描述：\"画面有明显的动态效果，动作大一些\"\n\n")
+	b.WriteString("1. 每个分镜头必须包含一个 video_prompt 字段，用于生成该分镜头的动态视频\n")
+	b.WriteString("2. video_prompt 必须包含以下信息：\n")
+	b.WriteString("   - 景别：特写/中景/远景/全景等镜头类型\n")
+	b.WriteString("   - 镜头运动：推进/拉远/横移/跟随/固定等运动方式\n")
+	b.WriteString("   - 时长：视频时长（秒），通常根据解说内容长度确定，一般5-15秒\n")
+	b.WriteString("   - 动态效果：人物动作、画面变化、光影变化等\n")
+	b.WriteString("3. video_prompt 格式示例：\n")
+	b.WriteString("   - \"特写镜头，缓慢推进，时长8秒，人物缓缓回头，画面有明显的动态效果\"\n")
+	b.WriteString("   - \"中景镜头，固定机位，时长10秒，树叶随风飘动，光影斑驳\"\n")
+	b.WriteString("   - \"远景镜头，缓慢拉远，时长12秒，背景有轻微的运动感\"\n")
+	b.WriteString("   - \"特写镜头，横移跟随，时长6秒，人物有自然的动作和表情变化\"\n")
+	b.WriteString("4. 如果没有明确的动态效果需求，可以使用默认描述：\"特写镜头，固定机位，时长10秒，画面有明显的动态效果，动作大一些\"\n\n")
 
 	fmt.Fprintf(&b, "当前进度：第 %d 章 / 共 %d 章。\n\n", chapterNum, totalChapters)
 	b.WriteString("下面是本章节的原始内容：\n")
@@ -163,14 +202,33 @@ func buildChapterNarrationPrompt(chapterContent string, chapterNum, totalChapter
   "scenes": [
     {
       "scene_number": "1",
-      "narration": "分镜级别的解说内容（可选）",
+      "narration": "场景级别的解说内容（可选）",
       "shots": [
         {
           "closeup_number": "1",
-          "character": "特写人物姓名",
-          "narration": "特写解说内容（30-32字，只包含故事内容，如：他缓缓转过身，目光中带着一丝疑惑。不要包含技术性描述）",
+          "character": "分镜头人物姓名",
+          "narration": "分镜头解说内容（只包含故事内容，如：他缓缓转过身，目光中带着一丝疑惑。不要包含技术性描述）",
           "scene_prompt": "场景描述（室内/外、季节、天气等）+ 角色描述 + 行为/事件 + 构图词（镜头类型、光影、画面质量等）",
-          "video_prompt": "镜头缓慢推进，人物缓缓回头，画面有明显的动态效果"
+          "video_prompt": "特写镜头，缓慢推进，时长8秒，人物缓缓回头，画面有明显的动态效果"
+        },
+        {
+          "closeup_number": "2",
+          "character": "分镜头人物姓名",
+          "narration": "分镜头解说内容",
+          "scene_prompt": "图片描述（用于生成图片）",
+          "video_prompt": "景别+镜头运动+时长+动态效果（例如：特写镜头，横移跟随，时长6秒，画面有明显的动态效果）"
+        }
+      ]
+    },
+    {
+      "scene_number": "2",
+      "shots": [
+        {
+          "closeup_number": "1",
+          "character": "分镜头人物姓名",
+          "narration": "分镜头解说内容",
+          "scene_prompt": "图片描述",
+          "video_prompt": "景别+镜头运动+时长+动态效果（例如：中景镜头，固定机位，时长10秒，画面有明显的动态效果）"
         }
       ]
     }
@@ -179,10 +237,35 @@ func buildChapterNarrationPrompt(chapterContent string, chapterNum, totalChapter
 	b.WriteString("\n\n【再次强调】\n")
 	b.WriteString("1. 只返回 JSON 内容，不要任何 markdown 代码块标记\n")
 	b.WriteString("2. 不要添加任何解释文字，直接输出 JSON\n")
-	b.WriteString("3. 确保解说内容总字数在1100-1300字之间，且至少有7个分镜\n")
-	b.WriteString("4. 输出必须以 { 开头，以 } 结尾\n")
-	b.WriteString("5. 解说内容（narration）必须只包含故事内容，禁止包含任何技术性描述（如\"室内场景\"、\"光影\"、\"近景拍摄\"等）\n")
-	b.WriteString("6. 所有技术性描述必须放在 scene_prompt 和 video_prompt 字段中，不要放在 narration 中\n")
+	b.WriteString("3. **严格禁止在数组或对象的最后一个元素后添加逗号**（这是最常见的 JSON 格式错误，例如不要写成 [1, 2, 3,] 或 {\"key\": \"value\",}）\n")
+	b.WriteString("4. 必须生成7个场景（scene），每个场景包含1-3个分镜头（shot）\n")
+	b.WriteString("5. 每个分镜头必须包含：narration（解说内容）、scene_prompt（图片描述）、video_prompt（视频描述）\n")
+
+	// 根据章节长度调整字数要求提示
+	if chapterWordCount > 0 {
+		minNarrationWords := chapterWordCount / 10
+		maxNarrationWords := chapterWordCount * 15 / 100
+		if minNarrationWords < 800 {
+			minNarrationWords = 800
+		}
+		if maxNarrationWords < 1000 {
+			maxNarrationWords = 1000
+		}
+		if minNarrationWords > 1500 {
+			minNarrationWords = 1500
+		}
+		if maxNarrationWords > 2000 {
+			maxNarrationWords = 2000
+		}
+		fmt.Fprintf(&b, "6. 确保解说内容总字数在%d-%d字之间（根据章节长度%d字调整）\n", minNarrationWords, maxNarrationWords, chapterWordCount)
+	} else {
+		b.WriteString("6. 确保解说内容总字数在1100-1300字之间\n")
+	}
+
+	b.WriteString("7. 输出必须以 { 开头，以 } 结尾\n")
+	b.WriteString("8. 解说内容（narration）必须只包含故事内容，禁止包含任何技术性描述（如\"室内场景\"、\"光影\"、\"近景拍摄\"等）\n")
+	b.WriteString("9. 所有技术性描述必须放在 scene_prompt 和 video_prompt 字段中，不要放在 narration 中\n")
+	b.WriteString("10. 输出前请仔细检查 JSON 格式，确保没有多余的逗号、没有单引号、没有注释\n")
 
 	return b.String()
 }

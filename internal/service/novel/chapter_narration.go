@@ -47,7 +47,8 @@ func (s *novelService) GenerateNarrationForChapter(ctx context.Context, chapterI
 	}
 
 	generator := noveltools.NewNarrationGenerator(s.llmProvider)
-	prompt, narrationText, err := generator.GenerateWithPrompt(ctx, ch.ChapterText, ch.Sequence, totalChapters)
+	// 传递章节字数，用于根据章节长度调整 prompt 要求
+	prompt, narrationText, err := generator.GenerateWithPrompt(ctx, ch.ChapterText, ch.Sequence, totalChapters, ch.WordCount)
 	if err != nil {
 		return "", err
 	}
@@ -117,7 +118,8 @@ func (s *novelService) GenerateNarrationsForAllChapters(ctx context.Context, nov
 			defer wg.Done()
 
 			generator := noveltools.NewNarrationGenerator(s.llmProvider)
-			prompt, narrationText, err := generator.GenerateWithPrompt(ctx, chapter.ChapterText, chapter.Sequence, totalChapters)
+			// 传递章节字数，用于根据章节长度调整 prompt 要求
+			prompt, narrationText, err := generator.GenerateWithPrompt(ctx, chapter.ChapterText, chapter.Sequence, totalChapters, chapter.WordCount)
 			if err != nil {
 				errCh <- fmt.Errorf("failed to generate narration for chapter %d: %w", chapter.Sequence, err)
 				return

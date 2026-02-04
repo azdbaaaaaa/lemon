@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"lemon/internal/model/novel"
 	"lemon/internal/pkg/id"
@@ -98,6 +99,12 @@ func (s *novelService) SplitNovelIntoChapters(ctx context.Context, novelID strin
 
 	for i, seg := range segments {
 		chapterID := id.New()
+
+		// 计算章节统计信息
+		totalChars := countChineseCharacters(seg.Text)
+		wordCount := countChineseWords(seg.Text)
+		lineCount := len(strings.Split(strings.TrimSpace(seg.Text), "\n"))
+
 		chapterEntity := &novel.Chapter{
 			ID:          chapterID,
 			NovelID:     novelID,
@@ -106,6 +113,9 @@ func (s *novelService) SplitNovelIntoChapters(ctx context.Context, novelID strin
 			Sequence:    i + 1,
 			Title:       seg.Title,
 			ChapterText: seg.Text,
+			TotalChars:  totalChars,
+			WordCount:   wordCount,
+			LineCount:   lineCount,
 		}
 
 		if err := s.chapterRepo.Create(ctx, chapterEntity); err != nil {
@@ -114,6 +124,31 @@ func (s *novelService) SplitNovelIntoChapters(ctx context.Context, novelID strin
 	}
 
 	return nil
+}
+
+// countChineseCharacters 计算中文字符数量（包括中文标点）
+func countChineseCharacters(text string) int {
+	count := 0
+	for _, r := range text {
+		// 中文字符范围：\u4e00-\u9fff
+		// 中文标点范围：\u3000-\u303f, \uff00-\uffef
+		if (r >= 0x4e00 && r <= 0x9fff) || (r >= 0x3000 && r <= 0x303f) || (r >= 0xff00 && r <= 0xffef) {
+			count++
+		}
+	}
+	return count
+}
+
+// countChineseWords 计算中文字数（仅中文字符，不包括标点）
+func countChineseWords(text string) int {
+	count := 0
+	for _, r := range text {
+		// 仅计算中文字符，不包括标点
+		if r >= 0x4e00 && r <= 0x9fff {
+			count++
+		}
+	}
+	return count
 }
 
 // GetNovel 获取小说信息

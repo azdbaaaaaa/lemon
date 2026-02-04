@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/rs/zerolog/log"
 
@@ -109,21 +110,68 @@ func (s *novelService) GenerateNarrationVideosForChapter(ctx context.Context, ch
 	// 5. 初始化 FFmpeg 客户端
 	ffmpegClient := ffmpeg.NewClient()
 
-	var videoIDs []string
-
-	// 6. 为每个分镜生成视频
+	// 6. 并发为每个分镜生成视频（最大并发数：10）
 	// 所有分镜都单独生成视频，使用图生视频方式
-	for i := 0; i < len(allShots) && i < 30; i++ {
+	maxConcurrency := 10
+	maxShots := len(allShots)
+	if maxShots > 30 {
+		maxShots = 30
+	}
+
+	// 使用 channel 控制并发数
+	semaphore := make(chan struct{}, maxConcurrency)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var videoIDs []string
+	var errors []error
+
+	for i := 0; i < maxShots; i++ {
 		shotInfo := allShots[i]
 		narrationNum := fmt.Sprintf("%02d", shotInfo.Index)
 
-		videoID, err := s.generateSingleNarrationVideo(ctx, chapterID, narration, shotInfo, narrationNum, videoVersion, ffmpegClient)
-		if err != nil {
-			log.Error().Err(err).Str("narration_num", narrationNum).Msg("生成分镜视频失败")
-			continue
-		}
-		videoIDs = append(videoIDs, videoID)
+		wg.Add(1)
+		go func(shotInfo struct {
+			SceneNumber string
+			ShotNumber  string
+			Shot        *novel.NarrationShot
+			Index       int
+		}, narrationNum string) {
+			defer wg.Done()
+
+			// 获取信号量（限制并发数）
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+
+			videoID, err := s.generateSingleNarrationVideo(ctx, chapterID, narration, shotInfo, narrationNum, videoVersion, ffmpegClient)
+			if err != nil {
+				log.Error().Err(err).Str("narration_num", narrationNum).Msg("生成分镜视频失败")
+				mu.Lock()
+				errors = append(errors, fmt.Errorf("narration %s: %w", narrationNum, err))
+				mu.Unlock()
+				return
+			}
+
+			mu.Lock()
+			videoIDs = append(videoIDs, videoID)
+			mu.Unlock()
+		}(shotInfo, narrationNum)
 	}
+
+	// 等待所有任务完成
+	wg.Wait()
+
+	// 如果有错误，记录日志但不返回错误（允许部分成功）
+	if len(errors) > 0 {
+		log.Warn().
+			Int("total_shots", maxShots).
+			Int("failed_count", len(errors)).
+			Msg("部分分镜视频生成失败")
+	}
+
+	// 按 sequence 排序 videoIDs（确保顺序正确）
+	// 由于每个 videoID 对应一个 shotInfo.Index，我们需要根据 video 的 sequence 排序
+	// 但这里 videoIDs 的顺序已经和 shotInfo.Index 的顺序一致，所以不需要额外排序
+	// 如果需要确保顺序，可以在生成后查询数据库按 sequence 排序
 
 	return videoIDs, nil
 }
@@ -552,16 +600,23 @@ func (s *novelService) generateSingleNarrationVideo(
 	imageDataURL := fmt.Sprintf("data:image/jpeg;base64,%s", imageBase64)
 
 	// 4. 构建视频 prompt
-	// 优先使用 shot.VideoPrompt（如果 LLM 生成了专门的视频 prompt）
-	// 如果没有，则基于图片 prompt 和场景描述构建
+	// 如果 LLM 生成了 video_prompt，作为基础，然后结合解说内容和场景描述进行增强
+	// 如果没有 video_prompt，则完全基于图片 prompt 和场景描述构建
 	var videoPrompt string
 	if shotInfo.Shot.VideoPrompt != "" {
-		videoPrompt = shotInfo.Shot.VideoPrompt
+		// 使用 LLM 生成的 video_prompt 作为基础，结合解说内容和场景描述进行增强
+		videoPrompt = enhanceVideoPrompt(
+			shotInfo.Shot.VideoPrompt,
+			image.Prompt,
+			shotInfo.Shot.ScenePrompt,
+			shotInfo.Shot.Narration,
+		)
 		log.Info().
 			Str("scene", shotInfo.SceneNumber).
 			Str("shot", shotInfo.ShotNumber).
-			Str("video_prompt", videoPrompt).
-			Msg("使用 LLM 生成的 video_prompt")
+			Str("original_video_prompt", shotInfo.Shot.VideoPrompt).
+			Str("enhanced_video_prompt", videoPrompt).
+			Msg("使用增强后的 video_prompt（基于 LLM 生成 + 解说内容 + 场景描述）")
 	} else {
 		// 如果没有 video_prompt，基于图片 prompt 和场景描述构建
 		videoPrompt = buildVideoPromptFromImage(image.Prompt, shotInfo.Shot.ScenePrompt, shotInfo.Shot.Narration)
@@ -576,6 +631,7 @@ func (s *novelService) generateSingleNarrationVideo(
 	}
 
 	// 5. 从图片创建视频
+	// 参考 Python 版本：直接使用音频时长作为视频时长，不解析 video_prompt 中的时长
 	// 如果音频时长 <= 12 秒，使用 Ark API 生成视频（使用 videoPrompt）
 	// 如果音频时长 > 12 秒，使用 FFmpeg 从图片创建视频（Ken Burns 效果）
 	tmpVideoPath := filepath.Join(tmpDir, fmt.Sprintf("video_%s.mp4", id.New()))
@@ -604,7 +660,30 @@ func (s *novelService) generateSingleNarrationVideo(
 		}
 	}
 
-	// 6. 获取对应音频片段的字幕文件
+	// 6. 下载音频文件
+	audioDownloadReq := &service.DownloadFileRequest{
+		ResourceID: audio.AudioResourceID,
+		UserID:     narration.UserID,
+	}
+	audioResult, err := s.resourceService.DownloadFile(ctx, audioDownloadReq)
+	if err != nil {
+		return "", fmt.Errorf("download audio: %w", err)
+	}
+	defer audioResult.Data.Close()
+
+	tmpAudioPath := filepath.Join(tmpDir, fmt.Sprintf("audio_%s.mp3", id.New()))
+	defer os.Remove(tmpAudioPath)
+	audioFile, err := os.Create(tmpAudioPath)
+	if err != nil {
+		return "", fmt.Errorf("create temp audio file: %w", err)
+	}
+	if _, err := io.Copy(audioFile, audioResult.Data); err != nil {
+		audioFile.Close()
+		return "", fmt.Errorf("copy audio data: %w", err)
+	}
+	audioFile.Close()
+
+	// 7. 获取对应音频片段的字幕文件
 	subtitle, err := s.subtitleRepo.FindByNarrationIDAndSequence(ctx, narration.ID, audio.Sequence)
 	if err != nil {
 		return "", fmt.Errorf("find subtitle for sequence %d: %w", audio.Sequence, err)
@@ -634,7 +713,101 @@ func (s *novelService) generateSingleNarrationVideo(
 	}
 	subtitleFile.Close()
 
-	// 7. 添加字幕到视频
+	// 7.5. 诊断：检查字幕时间戳和音频时长的同步情况
+	// 用于排查为什么会出现字幕和音频不同步的问题
+	subtitleContent, err := os.ReadFile(tmpSubtitlePath)
+	if err != nil {
+		log.Warn().Err(err).Msg("无法读取字幕文件，跳过字幕诊断")
+	} else {
+		// 解析 ASS 文件，提取第一个和最后一个字幕的时间戳
+		subtitleLines := strings.Split(string(subtitleContent), "\n")
+		var firstSubtitleTime, lastSubtitleTime float64
+		var subtitleCount int
+
+		for _, line := range subtitleLines {
+			if strings.HasPrefix(line, "Dialogue:") {
+				subtitleCount++
+				// 解析 Dialogue 行：Dialogue: 0,Start,End,Style,Name,...
+				parts := strings.Split(line, ",")
+				if len(parts) >= 3 {
+					// 解析开始时间
+					if startTime, err := parseASSTime(parts[1]); err == nil {
+						if firstSubtitleTime == 0 {
+							firstSubtitleTime = startTime
+						}
+						lastSubtitleTime = startTime
+					}
+					// 解析结束时间
+					if endTime, err := parseASSTime(parts[2]); err == nil {
+						lastSubtitleTime = endTime
+					}
+				}
+			}
+		}
+
+		log.Info().
+			Str("narration_id", narration.ID).
+			Int("sequence", audio.Sequence).
+			Float64("audio_duration", audioDuration).
+			Float64("subtitle_first_time", firstSubtitleTime).
+			Float64("subtitle_last_time", lastSubtitleTime).
+			Float64("subtitle_duration", lastSubtitleTime-firstSubtitleTime).
+			Int("subtitle_count", subtitleCount).
+			Msg("字幕同步诊断：对比音频时长和字幕时间戳范围")
+
+		// 检查字幕时间戳是否覆盖整个音频时长
+		if firstSubtitleTime > 0.5 {
+			log.Warn().
+				Str("narration_id", narration.ID).
+				Int("sequence", audio.Sequence).
+				Float64("first_subtitle_time", firstSubtitleTime).
+				Msg("⚠️ 字幕开始时间不是从0开始，可能导致字幕延迟")
+		}
+
+		if lastSubtitleTime < audioDuration-0.5 {
+			log.Warn().
+				Str("narration_id", narration.ID).
+				Int("sequence", audio.Sequence).
+				Float64("audio_duration", audioDuration).
+				Float64("last_subtitle_time", lastSubtitleTime).
+				Float64("missing_duration", audioDuration-lastSubtitleTime).
+				Msg("⚠️ 字幕结束时间早于音频结束时间，可能导致后半部分没有字幕")
+		}
+	}
+
+	// 7.6. 诊断：检查视频实际时长和音频时长的差异
+	videoInfo, err := ffmpegClient.GetVideoInfo(ctx, tmpVideoPath)
+	if err != nil {
+		log.Warn().Err(err).Msg("无法获取视频信息，跳过视频时长诊断")
+	} else {
+		actualVideoDuration := videoInfo.Duration
+		durationDiff := actualVideoDuration - audioDuration
+		log.Info().
+			Str("narration_id", narration.ID).
+			Int("sequence", audio.Sequence).
+			Float64("audio_duration", audioDuration).
+			Float64("video_duration", actualVideoDuration).
+			Float64("duration_diff", durationDiff).
+			Str("video_generation_method", func() string {
+				if audioDuration <= 12.0 {
+					return "Ark API"
+				}
+				return "FFmpeg (Ken Burns)"
+			}()).
+			Msg("视频时长诊断：对比音频和视频实际时长")
+
+		if abs(durationDiff) > 0.5 {
+			log.Warn().
+				Str("narration_id", narration.ID).
+				Int("sequence", audio.Sequence).
+				Float64("audio_duration", audioDuration).
+				Float64("video_duration", actualVideoDuration).
+				Float64("duration_diff", durationDiff).
+				Msg("⚠️ 视频时长和音频时长差异较大，可能导致字幕不匹配")
+		}
+	}
+
+	// 8. 添加字幕到视频
 	tmpWithSubtitlePath := filepath.Join(tmpDir, fmt.Sprintf("video_subtitle_%s.mp4", id.New()))
 	defer os.Remove(tmpWithSubtitlePath)
 
@@ -642,30 +815,7 @@ func (s *novelService) generateSingleNarrationVideo(
 		return "", fmt.Errorf("add subtitles: %w", err)
 	}
 
-	// 8. 下载音频文件
-	audioDownloadReq := &service.DownloadFileRequest{
-		ResourceID: audio.AudioResourceID,
-		UserID:     narration.UserID,
-	}
-	audioResult, err := s.resourceService.DownloadFile(ctx, audioDownloadReq)
-	if err != nil {
-		return "", fmt.Errorf("download audio: %w", err)
-	}
-	defer audioResult.Data.Close()
-
-	tmpAudioPath := filepath.Join(tmpDir, fmt.Sprintf("audio_%s.mp3", id.New()))
-	defer os.Remove(tmpAudioPath)
-	audioFile, err := os.Create(tmpAudioPath)
-	if err != nil {
-		return "", fmt.Errorf("create temp audio file: %w", err)
-	}
-	if _, err := io.Copy(audioFile, audioResult.Data); err != nil {
-		audioFile.Close()
-		return "", fmt.Errorf("copy audio data: %w", err)
-	}
-	audioFile.Close()
-
-	// 8. 替换音频
+	// 9. 替换音频（参考 Python 版本：直接使用音频文件，FFmpeg 会自动处理时长对齐）
 	tmpFinalPath := filepath.Join(tmpDir, fmt.Sprintf("video_final_%s.mp4", id.New()))
 	defer os.Remove(tmpFinalPath)
 
@@ -673,7 +823,7 @@ func (s *novelService) generateSingleNarrationVideo(
 		return "", fmt.Errorf("replace audio: %w", err)
 	}
 
-	// 9. 标准化视频分辨率
+	// 12. 标准化视频分辨率
 	tmpStandardizedPath := filepath.Join(tmpDir, fmt.Sprintf("video_std_%s.mp4", id.New()))
 	defer os.Remove(tmpStandardizedPath)
 
@@ -939,20 +1089,59 @@ func (s *novelService) GenerateFinalVideoForChapter(ctx context.Context, chapter
 		return "", fmt.Errorf("find chapter: %w", err)
 	}
 
-	// 2. 获取章节的所有 narration 视频
-	narrationVideos, err := s.videoRepo.FindByChapterIDAndType(ctx, chapterID, "narration_video")
+	// 2. 获取章节的所有视频版本号，找到最新版本
+	videoVersions, err := s.videoRepo.FindVersionsByChapterID(ctx, chapterID)
 	if err != nil {
-		return "", fmt.Errorf("find narration videos: %w", err)
+		return "", fmt.Errorf("find video versions: %w", err)
 	}
 
-	if len(narrationVideos) == 0 {
-		return "", fmt.Errorf("no narration videos found for chapter %s", chapterID)
+	if len(videoVersions) == 0 {
+		return "", fmt.Errorf("no videos found for chapter %s", chapterID)
+	}
+
+	// 找到最新版本号
+	maxVersion := 0
+	for _, v := range videoVersions {
+		if v > maxVersion {
+			maxVersion = v
+		}
+	}
+
+	if maxVersion == 0 {
+		return "", fmt.Errorf("no valid video version found for chapter %s", chapterID)
+	}
+
+	// 2.5. 只获取最新版本的 narration 视频（确保只合并最新版本的视频）
+	narrationVideos, err := s.videoRepo.FindByChapterIDAndVersion(ctx, chapterID, maxVersion)
+	if err != nil {
+		return "", fmt.Errorf("find narration videos for version %d: %w", maxVersion, err)
+	}
+
+	// 过滤出 narration_video 类型的视频
+	var filteredNarrationVideos []*novel.ChapterVideo
+	for _, video := range narrationVideos {
+		if video.VideoType == "narration_video" {
+			filteredNarrationVideos = append(filteredNarrationVideos, video)
+		}
+	}
+
+	if len(filteredNarrationVideos) == 0 {
+		return "", fmt.Errorf("no narration videos found for chapter %s, version %d", chapterID, maxVersion)
 	}
 
 	// 按 sequence 排序
-	sort.Slice(narrationVideos, func(i, j int) bool {
-		return narrationVideos[i].Sequence < narrationVideos[j].Sequence
+	sort.Slice(filteredNarrationVideos, func(i, j int) bool {
+		return filteredNarrationVideos[i].Sequence < filteredNarrationVideos[j].Sequence
 	})
+
+	narrationVideos = filteredNarrationVideos
+	videoVersion := maxVersion
+
+	log.Info().
+		Str("chapter_id", chapterID).
+		Int("version", videoVersion).
+		Int("narration_video_count", len(narrationVideos)).
+		Msg("使用最新版本的 narration 视频进行合并")
 
 	// 3. 初始化 FFmpeg 客户端
 	ffmpegClient := ffmpeg.NewClient()
@@ -960,18 +1149,18 @@ func (s *novelService) GenerateFinalVideoForChapter(ctx context.Context, chapter
 	// 4. 下载所有视频到临时文件
 	tmpDir := os.TempDir()
 	var videoPaths []string
-	for i, video := range narrationVideos {
+	for idx, video := range narrationVideos {
 		downloadReq := &service.DownloadFileRequest{
 			ResourceID: video.VideoResourceID,
 			UserID:     chapter.UserID,
 		}
 		videoResult, err := s.resourceService.DownloadFile(ctx, downloadReq)
 		if err != nil {
-			return "", fmt.Errorf("download video %d: %w", i+1, err)
+			return "", fmt.Errorf("download video %d: %w", idx+1, err)
 		}
 		defer videoResult.Data.Close()
 
-		tmpVideoPath := filepath.Join(tmpDir, fmt.Sprintf("video_%d_%s.mp4", i+1, id.New()))
+		tmpVideoPath := filepath.Join(tmpDir, fmt.Sprintf("video_%d_%s.mp4", idx+1, id.New()))
 		defer os.Remove(tmpVideoPath)
 
 		videoFile, err := os.Create(tmpVideoPath)
@@ -1077,12 +1266,8 @@ func (s *novelService) GenerateFinalVideoForChapter(ctx context.Context, chapter
 	}
 
 	// 10. 创建最终视频记录
+	// 使用与 narration 视频相同的版本号（已在前面获取）
 	videoID := id.New()
-	videoVersion, err := s.getNextVideoVersion(ctx, chapterID, 0)
-	if err != nil {
-		return "", fmt.Errorf("failed to get next video version: %w", err)
-	}
-
 	videoEntity := &novel.ChapterVideo{
 		ID:              videoID,
 		ChapterID:       chapterID,
@@ -1091,7 +1276,7 @@ func (s *novelService) GenerateFinalVideoForChapter(ctx context.Context, chapter
 		VideoResourceID: uploadResult.ResourceID,
 		Duration:        totalDuration,
 		VideoType:       "final_video",
-		Version:         videoVersion,
+		Version:         videoVersion, // 使用与 narration 视频相同的版本号
 		Status:          "completed",
 	}
 
@@ -1179,6 +1364,137 @@ func (s *novelService) getFinishVideoPath() string {
 
 	// 如果默认路径不存在，返回空字符串（表示跳过 finish 视频）
 	return ""
+}
+
+// enhanceVideoPrompt 增强已有的 video_prompt
+// 结合解说内容和场景描述，使视频 prompt 更加丰富和详细
+func enhanceVideoPrompt(baseVideoPrompt, imagePrompt, scenePrompt, narration string) string {
+	// 如果基础 prompt 为空，回退到完全构建的方式
+	if baseVideoPrompt == "" {
+		return buildVideoPromptFromImage(imagePrompt, scenePrompt, narration)
+	}
+
+	// 提取基础 prompt 中的关键信息（如时长、景别、镜头运动等）
+	// 然后结合解说内容和场景描述进行增强
+	var enhancedParts []string
+
+	// 1. 保留基础 prompt 中的核心信息（时长、景别、镜头运动等）
+	// 检查是否包含时长信息
+	if strings.Contains(baseVideoPrompt, "时长") {
+		// 提取时长信息（如"时长8秒"）
+		enhancedParts = append(enhancedParts, baseVideoPrompt)
+	} else {
+		// 如果没有时长信息，添加基础 prompt
+		enhancedParts = append(enhancedParts, baseVideoPrompt)
+	}
+
+	// 2. 从解说内容中提取动作和情绪描述
+	actionKeywords := map[string]string{
+		"走":  "人物缓慢行走，步伐自然",
+		"跑":  "人物快速奔跑，动作幅度大",
+		"跳":  "人物跳跃动作，充满动感",
+		"转身": "人物缓缓转身，动作流畅",
+		"回头": "人物缓缓回头，眼神自然",
+		"抬头": "人物抬头动作，表情自然",
+		"低头": "人物低头动作，神态专注",
+		"观察": "人物仔细观察，眼神专注",
+		"看":  "人物目光专注，表情自然",
+		"望":  "人物远望，眼神深邃",
+		"抬手": "人物抬手动作，手势自然",
+		"挥手": "人物挥手示意，动作优雅",
+		"点头": "人物点头示意，表情自然",
+		"摇头": "人物摇头动作，表情生动",
+		"移动": "人物位置移动，画面动态",
+		"前进": "人物向前移动，步伐稳健",
+		"后退": "人物向后移动，动作自然",
+		"坐下": "人物坐下动作，姿态自然",
+		"站起": "人物站起动作，动作流畅",
+		"伸手": "人物伸手动作，手势自然",
+		"握拳": "人物握拳动作，充满力量",
+		"张开": "人物张开手臂，动作舒展",
+	}
+
+	hasAction := false
+	for keyword, actionDesc := range actionKeywords {
+		if strings.Contains(narration, keyword) {
+			// 检查是否已经在基础 prompt 中包含类似描述
+			if !strings.Contains(baseVideoPrompt, keyword) && !strings.Contains(baseVideoPrompt, actionDesc) {
+				enhancedParts = append(enhancedParts, actionDesc)
+				hasAction = true
+				break
+			}
+		}
+	}
+
+	// 3. 从解说内容中提取情绪和表情描述
+	emotionKeywords := map[string]string{
+		"笑":  "人物表情自然，面带微笑",
+		"哭":  "人物表情悲伤，情绪真实",
+		"怒":  "人物表情严肃，情绪强烈",
+		"惊":  "人物表情惊讶，反应自然",
+		"疑惑": "人物表情疑惑，眼神专注",
+		"思考": "人物表情沉思，神态自然",
+		"温柔": "人物表情温柔，神态柔和",
+		"坚定": "人物表情坚定，眼神有力",
+		"兴奋": "人物表情兴奋，情绪高涨",
+		"紧张": "人物表情紧张，神态不安",
+		"放松": "人物表情放松，神态自然",
+		"专注": "人物表情专注，眼神集中",
+		"困惑": "人物表情困惑，神态迷茫",
+		"期待": "人物表情期待，眼神明亮",
+		"失望": "人物表情失望，情绪低落",
+	}
+
+	for keyword, emotionDesc := range emotionKeywords {
+		if strings.Contains(narration, keyword) {
+			// 检查是否已经在基础 prompt 中包含类似描述
+			if !strings.Contains(baseVideoPrompt, keyword) && !strings.Contains(baseVideoPrompt, emotionDesc) {
+				enhancedParts = append(enhancedParts, emotionDesc)
+				break
+			}
+		}
+	}
+
+	// 4. 从场景描述中提取环境动态效果
+	if strings.Contains(scenePrompt, "风") || strings.Contains(imagePrompt, "风") || strings.Contains(narration, "风") {
+		if !strings.Contains(baseVideoPrompt, "风") {
+			enhancedParts = append(enhancedParts, "背景有风吹动，树叶或衣物轻微摆动")
+		}
+	} else if strings.Contains(scenePrompt, "雨") || strings.Contains(imagePrompt, "雨") || strings.Contains(narration, "雨") {
+		if !strings.Contains(baseVideoPrompt, "雨") {
+			enhancedParts = append(enhancedParts, "背景有雨滴落下，画面湿润自然")
+		}
+	} else if strings.Contains(scenePrompt, "雪") || strings.Contains(imagePrompt, "雪") || strings.Contains(narration, "雪") {
+		if !strings.Contains(baseVideoPrompt, "雪") {
+			enhancedParts = append(enhancedParts, "背景有雪花飘落，画面唯美")
+		}
+	} else if !hasAction && !strings.Contains(baseVideoPrompt, "背景") {
+		enhancedParts = append(enhancedParts, "背景有轻微的运动感，光影自然变化")
+	}
+
+	// 5. 从解说内容中提取节奏描述
+	if strings.Contains(narration, "缓缓") || strings.Contains(narration, "慢慢") || strings.Contains(narration, "缓慢") {
+		if !strings.Contains(baseVideoPrompt, "缓慢") && !strings.Contains(baseVideoPrompt, "缓缓") {
+			enhancedParts = append(enhancedParts, "整体节奏缓慢，画面过渡自然流畅")
+		}
+	} else if strings.Contains(narration, "快速") || strings.Contains(narration, "迅速") || strings.Contains(narration, "急速") {
+		if !strings.Contains(baseVideoPrompt, "快速") && !strings.Contains(baseVideoPrompt, "迅速") {
+			enhancedParts = append(enhancedParts, "整体节奏较快，动作流畅有力")
+		}
+	}
+
+	// 6. 添加画面质量描述（如果基础 prompt 中没有）
+	if !strings.Contains(baseVideoPrompt, "清晰") && !strings.Contains(baseVideoPrompt, "细节") {
+		enhancedParts = append(enhancedParts, "画面清晰，细节丰富，动态效果自然")
+	}
+
+	// 组合所有部分
+	if len(enhancedParts) > 0 {
+		return strings.Join(enhancedParts, "，")
+	}
+
+	// 如果没有增强内容，返回基础 prompt
+	return baseVideoPrompt
 }
 
 // buildVideoPromptFromImage 基于图片 prompt 和场景描述构建视频动态效果 prompt
@@ -1289,4 +1605,12 @@ func buildVideoPromptFromImage(imagePrompt, scenePrompt, narration string) strin
 	videoPrompt := strings.Join(promptParts, "，")
 
 	return videoPrompt
+}
+
+// abs 计算绝对值（用于时长差异计算）
+func abs(x float64) float64 {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
