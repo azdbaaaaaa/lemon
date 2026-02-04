@@ -11,13 +11,13 @@ import (
 	"lemon/internal/model/novel"
 )
 
-// ChapterAudioRepository 章节音频仓库接口
-type ChapterAudioRepository interface {
-	Create(ctx context.Context, a *novel.ChapterAudio) error
-	FindByID(ctx context.Context, id string) (*novel.ChapterAudio, error)
-	FindByNarrationID(ctx context.Context, narrationID string) ([]*novel.ChapterAudio, error)
-	FindByChapterID(ctx context.Context, chapterID string) ([]*novel.ChapterAudio, error)
-	FindByNarrationIDAndVersion(ctx context.Context, narrationID string, version int) ([]*novel.ChapterAudio, error)
+// AudioRepository 音频仓库接口
+type AudioRepository interface {
+	Create(ctx context.Context, a *novel.Audio) error
+	FindByID(ctx context.Context, id string) (*novel.Audio, error)
+	FindByNarrationID(ctx context.Context, narrationID string) ([]*novel.Audio, error)
+	FindByChapterID(ctx context.Context, chapterID string) ([]*novel.Audio, error)
+	FindByNarrationIDAndVersion(ctx context.Context, narrationID string, version int) ([]*novel.Audio, error)
 	FindVersionsByNarrationID(ctx context.Context, narrationID string) ([]int, error)
 	FindVersionsByChapterID(ctx context.Context, chapterID string) ([]int, error)
 	UpdateStatus(ctx context.Context, id string, status string) error
@@ -25,19 +25,19 @@ type ChapterAudioRepository interface {
 	Delete(ctx context.Context, id string) error
 }
 
-// ChapterAudioRepo 章节音频仓库实现
-type ChapterAudioRepo struct {
+// AudioRepo 音频仓库实现
+type AudioRepo struct {
 	coll *mongo.Collection
 }
 
-// NewChapterAudioRepo 创建章节音频仓库
-func NewChapterAudioRepo(db *mongo.Database) *ChapterAudioRepo {
-	var c novel.ChapterAudio
-	return &ChapterAudioRepo{coll: db.Collection(c.Collection())}
+// NewAudioRepo 创建音频仓库
+func NewAudioRepo(db *mongo.Database) *AudioRepo {
+	var a novel.Audio
+	return &AudioRepo{coll: db.Collection(a.Collection())}
 }
 
 // Create 创建音频记录
-func (r *ChapterAudioRepo) Create(ctx context.Context, a *novel.ChapterAudio) error {
+func (r *AudioRepo) Create(ctx context.Context, a *novel.Audio) error {
 	now := time.Now()
 	a.CreatedAt = now
 	a.UpdatedAt = now
@@ -51,68 +51,68 @@ func (r *ChapterAudioRepo) Create(ctx context.Context, a *novel.ChapterAudio) er
 	return err
 }
 
-// FindByID 根据ID查询音频
-func (r *ChapterAudioRepo) FindByID(ctx context.Context, id string) (*novel.ChapterAudio, error) {
-	var a novel.ChapterAudio
+// FindByID 根据ID查询
+func (r *AudioRepo) FindByID(ctx context.Context, id string) (*novel.Audio, error) {
+	var a novel.Audio
 	if err := r.coll.FindOne(ctx, bson.M{"id": id, "deleted_at": nil}).Decode(&a); err != nil {
 		return nil, err
 	}
 	return &a, nil
 }
 
-// FindByNarrationID 根据章节解说ID查询所有音频
-func (r *ChapterAudioRepo) FindByNarrationID(ctx context.Context, narrationID string) ([]*novel.ChapterAudio, error) {
+// FindByNarrationID 查询解说的所有音频（按sequence排序）
+func (r *AudioRepo) FindByNarrationID(ctx context.Context, narrationID string) ([]*novel.Audio, error) {
 	filter := bson.M{"narration_id": narrationID, "deleted_at": nil}
 	opts := options.Find().SetSort(bson.M{"sequence": 1})
-	cursor, err := r.coll.Find(ctx, filter, opts)
+	cur, err := r.coll.Find(ctx, filter, opts)
 	if err != nil {
 		return nil, err
 	}
-	defer cursor.Close(ctx)
+	defer cur.Close(ctx)
 
-	var audios []*novel.ChapterAudio
-	if err := cursor.All(ctx, &audios); err != nil {
+	var audios []*novel.Audio
+	if err := cur.All(ctx, &audios); err != nil {
 		return nil, err
 	}
 	return audios, nil
 }
 
-// FindByChapterID 根据章节ID查询所有音频
-func (r *ChapterAudioRepo) FindByChapterID(ctx context.Context, chapterID string) ([]*novel.ChapterAudio, error) {
+// FindByChapterID 查询章节的所有音频
+func (r *AudioRepo) FindByChapterID(ctx context.Context, chapterID string) ([]*novel.Audio, error) {
 	filter := bson.M{"chapter_id": chapterID, "deleted_at": nil}
 	opts := options.Find().SetSort(bson.M{"sequence": 1})
-	cursor, err := r.coll.Find(ctx, filter, opts)
+	cur, err := r.coll.Find(ctx, filter, opts)
 	if err != nil {
 		return nil, err
 	}
-	defer cursor.Close(ctx)
+	defer cur.Close(ctx)
 
-	var audios []*novel.ChapterAudio
-	if err := cursor.All(ctx, &audios); err != nil {
+	var audios []*novel.Audio
+	if err := cur.All(ctx, &audios); err != nil {
 		return nil, err
 	}
 	return audios, nil
 }
 
-// FindByNarrationIDAndVersion 根据章节解说ID和版本号查询所有音频
-func (r *ChapterAudioRepo) FindByNarrationIDAndVersion(ctx context.Context, narrationID string, version int) ([]*novel.ChapterAudio, error) {
+// FindByNarrationIDAndVersion 根据解说ID和版本号查询音频
+func (r *AudioRepo) FindByNarrationIDAndVersion(ctx context.Context, narrationID string, version int) ([]*novel.Audio, error) {
 	filter := bson.M{"narration_id": narrationID, "version": version, "deleted_at": nil}
 	opts := options.Find().SetSort(bson.M{"sequence": 1})
-	cursor, err := r.coll.Find(ctx, filter, opts)
+	cur, err := r.coll.Find(ctx, filter, opts)
 	if err != nil {
 		return nil, err
 	}
-	defer cursor.Close(ctx)
+	defer cur.Close(ctx)
 
-	var audios []*novel.ChapterAudio
-	if err := cursor.All(ctx, &audios); err != nil {
+	var audios []*novel.Audio
+	if err := cur.All(ctx, &audios); err != nil {
 		return nil, err
 	}
 	return audios, nil
 }
 
-// FindVersionsByNarrationID 查询章节解说的所有版本号
-func (r *ChapterAudioRepo) FindVersionsByNarrationID(ctx context.Context, narrationID string) ([]int, error) {
+// FindVersionsByNarrationID 查询解说的所有音频版本号
+func (r *AudioRepo) FindVersionsByNarrationID(ctx context.Context, narrationID string) ([]int, error) {
 	filter := bson.M{"narration_id": narrationID, "deleted_at": nil}
 	opts := options.Find().SetProjection(bson.M{"version": 1}).SetSort(bson.M{"created_at": -1})
 	cur, err := r.coll.Find(ctx, filter, opts)
@@ -145,7 +145,7 @@ func (r *ChapterAudioRepo) FindVersionsByNarrationID(ctx context.Context, narrat
 }
 
 // FindVersionsByChapterID 查询章节的所有音频版本号
-func (r *ChapterAudioRepo) FindVersionsByChapterID(ctx context.Context, chapterID string) ([]int, error) {
+func (r *AudioRepo) FindVersionsByChapterID(ctx context.Context, chapterID string) ([]int, error) {
 	filter := bson.M{"chapter_id": chapterID, "deleted_at": nil}
 	opts := options.Find().SetProjection(bson.M{"version": 1}).SetSort(bson.M{"created_at": -1})
 	cur, err := r.coll.Find(ctx, filter, opts)
@@ -177,8 +177,8 @@ func (r *ChapterAudioRepo) FindVersionsByChapterID(ctx context.Context, chapterI
 	return versions, nil
 }
 
-// UpdateStatus 更新音频状态
-func (r *ChapterAudioRepo) UpdateStatus(ctx context.Context, id string, status string) error {
+// UpdateStatus 更新状态
+func (r *AudioRepo) UpdateStatus(ctx context.Context, id string, status string) error {
 	_, err := r.coll.UpdateOne(
 		ctx,
 		bson.M{"id": id},
@@ -190,8 +190,8 @@ func (r *ChapterAudioRepo) UpdateStatus(ctx context.Context, id string, status s
 	return err
 }
 
-// UpdateVersion 更新章节音频版本号
-func (r *ChapterAudioRepo) UpdateVersion(ctx context.Context, id string, version int) error {
+// UpdateVersion 更新版本号
+func (r *AudioRepo) UpdateVersion(ctx context.Context, id string, version int) error {
 	_, err := r.coll.UpdateOne(
 		ctx,
 		bson.M{"id": id},
@@ -203,8 +203,8 @@ func (r *ChapterAudioRepo) UpdateVersion(ctx context.Context, id string, version
 	return err
 }
 
-// Delete 软删除音频
-func (r *ChapterAudioRepo) Delete(ctx context.Context, id string) error {
+// Delete 软删除
+func (r *AudioRepo) Delete(ctx context.Context, id string) error {
 	_, err := r.coll.UpdateOne(
 		ctx,
 		bson.M{"id": id},

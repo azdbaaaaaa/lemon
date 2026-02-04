@@ -319,7 +319,7 @@ func findOrCreateTestChapters(ctx context.Context, t *testing.T, services *TestS
 
 // findOrCreateTestNarration 查找或创建测试章节解说
 // 优先使用数据库中已有的章节解说（从已有的章节中查找）
-func findOrCreateTestNarration(ctx context.Context, t *testing.T, services *TestServices, userID string) (string, *novel.ChapterNarration) {
+func findOrCreateTestNarration(ctx context.Context, t *testing.T, services *TestServices, userID string) (string, *novel.Narration) {
 	// 1. 先尝试查找已有的章节
 	_, chapters := findOrCreateTestChapters(ctx, t, services, userID)
 	if len(chapters) == 0 {
@@ -401,7 +401,7 @@ func setupTestServices(db *mongo.Database, testStorage storage.Storage) *TestSer
 }
 
 // requireTestNarration 要求必须有解说文案，否则报错并提示先运行 3.narration_test.go
-func requireTestNarration(ctx context.Context, t *testing.T, services *TestServices, userID string) (string, *novel.ChapterNarration) {
+func requireTestNarration(ctx context.Context, t *testing.T, services *TestServices, userID string) (string, *novel.Narration) {
 	_, chapters := findOrCreateTestChapters(ctx, t, services, userID)
 	if len(chapters) == 0 {
 		t.Fatal("测试失败：未找到测试章节。请先运行 2.novel_test.go 创建章节。")
@@ -415,7 +415,7 @@ func requireTestNarration(ctx context.Context, t *testing.T, services *TestServi
 	}
 
 	// 如果找不到，直接查询数据库检查是否有该章节的解说文案（用于调试）
-	var narrationModel novel.ChapterNarration
+	var narrationModel novel.Narration
 	narrationColl := testDB.Collection(narrationModel.Collection())
 	collectionName := narrationModel.Collection()
 
@@ -431,7 +431,7 @@ func requireTestNarration(ctx context.Context, t *testing.T, services *TestServi
 
 		// 尝试查询所有记录（包括已删除的）看看数据
 		cursor, _ := narrationColl.Find(ctx, chapterFilter, options.Find().SetSort(bson.M{"created_at": -1}).SetLimit(5))
-		var allNarrations []*novel.ChapterNarration
+		var allNarrations []*novel.Narration
 		if cursor != nil {
 			cursor.All(ctx, &allNarrations)
 			cursor.Close(ctx)
@@ -455,7 +455,7 @@ func requireTestNarration(ctx context.Context, t *testing.T, services *TestServi
 	opts := options.Find().SetSort(bson.M{"created_at": -1}).SetLimit(1)
 	cursor, err := narrationColl.Find(ctx, narrationFilter, opts)
 	if err == nil {
-		var narrations []*novel.ChapterNarration
+		var narrations []*novel.Narration
 		if err := cursor.All(ctx, &narrations); err == nil && len(narrations) > 0 {
 			// 找到了解说文案，使用它
 			t.Logf("未找到章节 %s 的解说文案，但找到了其他章节的解说文案（章节ID: %s），使用它", firstChapter.ID, narrations[0].ChapterID)
@@ -485,7 +485,7 @@ func requireTestNarration(ctx context.Context, t *testing.T, services *TestServi
 
 // requireTestAudios 要求必须有音频，否则报错并提示先运行 4.audio_test.go
 func requireTestAudios(ctx context.Context, t *testing.T, narrationID string) {
-	var audioModel novel.ChapterAudio
+	var audioModel novel.Audio
 	audioColl := testDB.Collection(audioModel.Collection())
 	audioFilter := bson.M{"narration_id": narrationID, "deleted_at": nil}
 	audioCount, err := audioColl.CountDocuments(ctx, audioFilter)
@@ -499,7 +499,7 @@ func requireTestAudios(ctx context.Context, t *testing.T, narrationID string) {
 
 // requireTestSubtitles 要求必须有字幕，否则报错并提示先运行 5.subtitle_test.go
 func requireTestSubtitles(ctx context.Context, t *testing.T, narrationID string) {
-	var subtitleModel novel.ChapterSubtitle
+	var subtitleModel novel.Subtitle
 	subtitleColl := testDB.Collection(subtitleModel.Collection())
 	subtitleFilter := bson.M{"narration_id": narrationID, "deleted_at": nil}
 	subtitleCount, err := subtitleColl.CountDocuments(ctx, subtitleFilter)
@@ -516,7 +516,7 @@ func requireTestImages(ctx context.Context, t *testing.T, narrationID string, mi
 	if minCount <= 0 {
 		minCount = 2
 	}
-	var imageModel novel.ChapterImage
+	var imageModel novel.Image
 	imageColl := testDB.Collection(imageModel.Collection())
 	imageFilter := bson.M{"narration_id": narrationID, "deleted_at": nil}
 	imageCount, err := imageColl.CountDocuments(ctx, imageFilter)
@@ -537,7 +537,7 @@ func requireTestFirstVideos(ctx context.Context, t *testing.T, chapterID string)
 
 // requireTestNarrationVideos 要求必须有 narration_video，否则报错并提示先运行 TestNovelService_GenerateNarrationVideos
 func requireTestNarrationVideos(ctx context.Context, t *testing.T, chapterID string) {
-	var videoModel novel.ChapterVideo
+	var videoModel novel.Video
 	videoColl := testDB.Collection(videoModel.Collection())
 	videoFilter := bson.M{"chapter_id": chapterID, "video_type": "narration_video", "deleted_at": nil, "status": "completed"}
 	videoCount, err := videoColl.CountDocuments(ctx, videoFilter)

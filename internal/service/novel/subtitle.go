@@ -44,10 +44,6 @@ func (s *novelService) GenerateSubtitlesForNarration(ctx context.Context, narrat
 		return nil, fmt.Errorf("failed to find narration: %w", err)
 	}
 
-	if narration.Content == nil {
-		return nil, fmt.Errorf("narration content is nil")
-	}
-
 	// 2. 自动生成下一个版本号（基于章节ID，独立递增）
 	subtitleVersion, err := s.getNextSubtitleVersion(ctx, narration.ChapterID, 0)
 	if err != nil {
@@ -83,18 +79,29 @@ func (s *novelService) GenerateSubtitlesForNarration(ctx context.Context, narrat
 		return nil, fmt.Errorf("no audio records found for narration %s version %d, please generate audio first", narrationID, maxAudioVersion)
 	}
 
-	// 4. 从章节解说中提取所有文本
-	extractor := noveltools.NewNarrationExtractor()
-	narrationTexts, err := extractor.ExtractNarrationTexts(narration.Content)
+	// 4. 从独立的表中查询所有镜头（按 index 排序）
+	shots, err := s.shotRepo.FindByNarrationID(ctx, narrationID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to extract narration texts: %w", err)
+		return nil, fmt.Errorf("failed to find shots: %w", err)
+	}
+
+	if len(shots) == 0 {
+		return nil, fmt.Errorf("no shots found for narration")
+	}
+
+	// 5. 从 Shot 表中提取所有解说文本（按 index 排序）
+	var narrationTexts []string
+	for _, shot := range shots {
+		if shot.Narration != "" {
+			narrationTexts = append(narrationTexts, shot.Narration)
+		}
 	}
 
 	if len(narrationTexts) == 0 {
 		return nil, fmt.Errorf("no narration texts found")
 	}
 
-	// 5. 为每个音频片段生成对应的字幕文件
+	// 6. 为每个音频片段生成对应的字幕文件
 	var subtitleIDs []string
 	for i, audio := range audios {
 		sequence := audio.Sequence
@@ -131,8 +138,8 @@ func (s *novelService) GenerateSubtitlesForNarration(ctx context.Context, narrat
 // generateSingleSubtitle 为单个音频片段生成字幕文件
 func (s *novelService) generateSingleSubtitle(
 	ctx context.Context,
-	narration *novel.ChapterNarration,
-	audio *novel.ChapterAudio,
+	narration *novel.Narration,
+	audio *novel.Audio,
 	sequence int,
 	narrationText string,
 	version int,
@@ -229,7 +236,7 @@ func (s *novelService) generateSingleSubtitle(
 
 	// 9. 创建 chapter_subtitle 记录
 	subtitleID := id.New()
-	subtitleEntity := &novel.ChapterSubtitle{
+	subtitleEntity := &novel.Subtitle{
 		ID:                 subtitleID,
 		ChapterID:          narration.ChapterID,
 		NarrationID:        narration.ID,

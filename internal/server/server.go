@@ -14,11 +14,15 @@ import (
 	"lemon/internal/config"
 	"lemon/internal/handler"
 	authHandler "lemon/internal/handler/auth"
+	novelHandler "lemon/internal/handler/novel"
+	resourceHandler "lemon/internal/handler/resource"
 	"lemon/internal/pkg/cache"
 	"lemon/internal/pkg/mongodb"
+	"lemon/internal/pkg/storagefactory"
 	authRepo "lemon/internal/repository/auth"
 	"lemon/internal/server/middleware"
 	"lemon/internal/service"
+	novelService "lemon/internal/service/novel"
 )
 
 // Server HTTP 服务器
@@ -179,6 +183,62 @@ func (s *Server) setupRoutes() {
 
 		// Conversation 接口
 		// TODO: 实现conversation模块（需要先完成model定义）
+
+		// Resource 接口（资源管理）
+		if s.mongo != nil {
+			// 初始化 ResourceService（需要 storage）
+			storage, err := storagefactory.NewStorage(context.Background(), &s.cfg.Storage)
+			if err != nil {
+				log.Warn().Err(err).Msg("failed to initialize storage, resource endpoints disabled")
+			} else {
+				resourceSvc := service.NewResourceService(s.mongo.Database(), storage)
+				resourceHdl := resourceHandler.NewHandler(resourceSvc)
+
+				// 资源管理接口
+				v1.POST("/resources/upload", resourceHdl.UploadFile)
+				v1.GET("/resources", resourceHdl.ListResources)
+				v1.GET("/resources/:resource_id", resourceHdl.GetResource)
+				v1.GET("/resources/:resource_id/download", resourceHdl.DownloadFile)
+				v1.GET("/resources/:resource_id/download-url", resourceHdl.GetDownloadURL)
+			}
+		} else {
+			log.Warn().Msg("MongoDB not configured, resource endpoints disabled")
+		}
+
+		// Novel 接口（小说相关）
+		if s.mongo != nil {
+			// 初始化 ResourceService（需要 storage）
+			storage, err := storagefactory.NewStorage(context.Background(), &s.cfg.Storage)
+			if err != nil {
+				log.Warn().Err(err).Msg("failed to initialize storage, novel endpoints disabled")
+			} else {
+				resourceSvc := service.NewResourceService(s.mongo.Database(), storage)
+				novelSvc, err := novelService.NewNovelService(s.mongo.Database(), resourceSvc)
+				if err != nil {
+					log.Warn().Err(err).Msg("failed to initialize NovelService, novel endpoints disabled")
+				} else {
+					novelHdl := novelHandler.NewHandler(novelSvc)
+
+					// 小说管理接口
+					v1.POST("/novels", novelHdl.CreateNovel)
+					v1.GET("/novels/:novel_id", novelHdl.GetNovel)
+
+					// 章节管理接口
+					v1.POST("/novels/:novel_id/chapters/split", novelHdl.SplitChapters)
+					v1.GET("/novels/:novel_id/chapters", novelHdl.GetChapters)
+
+					// 视频生成接口
+					v1.POST("/novels/chapters/:chapter_id/videos/narration", novelHdl.GenerateNarrationVideos)
+					v1.POST("/novels/chapters/:chapter_id/videos/final", novelHdl.GenerateFinalVideo)
+
+					// 视频查询接口
+					v1.GET("/novels/chapters/:chapter_id/videos/versions", novelHdl.GetVideoVersions)
+					v1.GET("/videos", novelHdl.GetVideosByStatus)
+				}
+			}
+		} else {
+			log.Warn().Msg("MongoDB not configured, novel endpoints disabled")
+		}
 	}
 }
 

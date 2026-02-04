@@ -2,12 +2,12 @@ package noveltools
 
 import (
 	"fmt"
-
-	"lemon/internal/model/novel"
 )
 
 // NarrationExtractor 解说内容提取器
 // 用于从解说文案内容中提取所有解说文本
+// 注意：此函数已废弃，现在应该直接从 Shot 表查询数据
+// 保留此函数仅用于向后兼容，但建议使用新的方式
 type NarrationExtractor struct{}
 
 // NewNarrationExtractor 创建解说内容提取器实例
@@ -16,15 +16,16 @@ func NewNarrationExtractor() *NarrationExtractor {
 }
 
 // ExtractNarrationTexts 从解说文案内容中提取所有解说文本
-// 参考 Python 的 extract_narration_content，但适配结构体格式
+// 注意：此函数已废弃，现在应该直接从 Shot 表查询数据
+// 保留此函数仅用于向后兼容，但建议使用新的方式
 //
 // Args:
-//   - content: 解说文案的 Content 字段（*NarrationContent）
+//   - content: 解说文案的临时 JSON 结构体（*narrationJSONContent）
 //
 // Returns:
 //   - []string: 所有解说文本列表（按顺序）
 //   - error: 错误信息
-func (ne *NarrationExtractor) ExtractNarrationTexts(content *novel.NarrationContent) ([]string, error) {
+func (ne *NarrationExtractor) ExtractNarrationTexts(content *NarrationJSONContent) ([]string, error) {
 	if content == nil {
 		return nil, fmt.Errorf("content is nil")
 	}

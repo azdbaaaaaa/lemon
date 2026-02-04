@@ -42,21 +42,28 @@ func (s *novelService) GenerateAudiosForNarration(ctx context.Context, narration
 		return nil, fmt.Errorf("failed to find narration: %w", err)
 	}
 
-	if narration.Content == nil {
-		return nil, fmt.Errorf("narration content is nil")
+	// 2. 从独立的表中查询所有镜头（按 index 排序）
+	shots, err := s.shotRepo.FindByNarrationID(ctx, narrationID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find shots: %w", err)
 	}
 
-	// 2. 自动生成下一个版本号（基于章节ID，独立递增）
+	if len(shots) == 0 {
+		return nil, fmt.Errorf("no shots found for narration")
+	}
+
+	// 3. 自动生成下一个版本号（基于章节ID，独立递增）
 	audioVersion, err := s.getNextAudioVersion(ctx, narration.ChapterID, 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get next audio version: %w", err)
 	}
 
-	// 2. 从 JSON content 中提取所有解说文本
-	extractor := noveltools.NewNarrationExtractor()
-	narrationTexts, err := extractor.ExtractNarrationTexts(narration.Content)
-	if err != nil {
-		return nil, fmt.Errorf("failed to extract narration texts: %w", err)
+	// 4. 从 Shot 表中提取所有解说文本（按 index 排序）
+	var narrationTexts []string
+	for _, shot := range shots {
+		if shot.Narration != "" {
+			narrationTexts = append(narrationTexts, shot.Narration)
+		}
 	}
 
 	if len(narrationTexts) == 0 {
@@ -92,7 +99,7 @@ func (s *novelService) GenerateAudiosForNarration(ctx context.Context, narration
 // generateSingleAudio 生成单个章节音频片段
 func (s *novelService) generateSingleAudio(
 	ctx context.Context,
-	narration *novel.ChapterNarration,
+	narration *novel.Narration,
 	sequence int,
 	text string,
 	version int,
@@ -160,7 +167,7 @@ func (s *novelService) generateSingleAudio(
 
 	// 8. 创建 chapter_audio 记录
 	audioID := id.New()
-	audioEntity := &novel.ChapterAudio{
+	audioEntity := &novel.Audio{
 		ID:              audioID,
 		NarrationID:     narration.ID,
 		ChapterID:       narration.ChapterID,

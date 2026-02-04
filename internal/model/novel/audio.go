@@ -9,11 +9,11 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-// ChapterAudio 章节音频实体
-// 说明：每个章节的章节解说会生成多个音频片段，每个片段对应一个 ChapterAudio 记录
-type ChapterAudio struct {
-	ID              string     `bson:"id" json:"id"`                               // 章节音频ID（UUID）
-	NarrationID     string     `bson:"narration_id" json:"narration_id"`           // 关联的章节解说ID
+// Audio 音频实体
+// 说明：每个解说的每个镜头会生成一个音频片段，每个片段对应一个 Audio 记录
+type Audio struct {
+	ID              string     `bson:"id" json:"id"`                               // 音频ID（UUID）
+	NarrationID     string     `bson:"narration_id" json:"narration_id"`           // 关联的解说ID
 	ChapterID       string     `bson:"chapter_id" json:"chapter_id"`               // 关联的章节ID
 	UserID          string     `bson:"user_id" json:"user_id"`                     // 用户ID
 	Sequence        int        `bson:"sequence" json:"sequence"`                   // 音频片段序号（从1开始）
@@ -21,7 +21,7 @@ type ChapterAudio struct {
 	Duration        float64    `bson:"duration" json:"duration"`                   // 音频时长（秒）
 	Text            string     `bson:"text" json:"text"`                           // 对应的解说文本
 	Timestamps      []CharTime `bson:"timestamps" json:"timestamps"`               // 字符级别的时间戳
-	Prompt          string     `bson:"prompt,omitempty" json:"prompt,omitempty"`   // 生成章节音频时使用的提示词/参数（TTS参数配置）
+	Prompt          string     `bson:"prompt,omitempty" json:"prompt,omitempty"`   // 生成音频时使用的提示词/参数（TTS参数配置）
 	Version         int        `bson:"version" json:"version"`                     // 版本号（用于支持多版本，默认 1）
 	Status          string     `bson:"status" json:"status"`                       // 状态：pending, completed, failed
 	CreatedAt       time.Time  `bson:"created_at" json:"created_at"`
@@ -37,13 +37,13 @@ type CharTime struct {
 }
 
 // Collection 返回集合名称
-func (c *ChapterAudio) Collection() string {
-	return "chapter_audios"
+func (a *Audio) Collection() string {
+	return "audios"
 }
 
 // EnsureIndexes 创建和维护索引
-func (c *ChapterAudio) EnsureIndexes(ctx context.Context, db *mongo.Database) error {
-	coll := db.Collection(c.Collection())
+func (a *Audio) EnsureIndexes(ctx context.Context, db *mongo.Database) error {
+	coll := db.Collection(a.Collection())
 	indexes := []mongo.IndexModel{
 		{
 			Keys:    bson.D{{Key: "narration_id", Value: 1}, {Key: "sequence", Value: 1}},

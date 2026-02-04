@@ -4,14 +4,11 @@ import (
 	"time"
 
 	"lemon/internal/model/auth"
+	httputil "lemon/internal/pkg/http"
 )
 
-// ErrorResponse 错误响应（所有API共用）
-type ErrorResponse struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-	Detail  string `json:"detail,omitempty"`
-}
+// ErrorResponse 错误响应类型别名（使用共用的 http.ErrorResponse）
+type ErrorResponse = httputil.ErrorResponse
 
 // toUserInfo 将User实体转换为UserInfo（所有API共用）
 func toUserInfo(user *auth.User) UserInfo {

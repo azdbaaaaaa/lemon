@@ -38,7 +38,7 @@ type VideoService interface {
 	GetVideoVersions(ctx context.Context, chapterID string) ([]int, error)
 
 	// GetVideosByStatus 根据状态查询视频（用于轮询）
-	GetVideosByStatus(ctx context.Context, status string) ([]*novel.ChapterVideo, error)
+	GetVideosByStatus(ctx context.Context, status string) ([]*novel.Video, error)
 }
 
 // GenerateFirstVideosForChapter 已废弃：现在所有视频都使用图生视频方式，不再需要 first_video
@@ -61,35 +61,41 @@ func (s *novelService) GenerateNarrationVideosForChapter(ctx context.Context, ch
 		return nil, fmt.Errorf("find narration: %w", err)
 	}
 
-	if narration.Content == nil || len(narration.Content.Scenes) == 0 {
-		return nil, fmt.Errorf("narration content is empty")
+	// 2. 从独立的表中查询场景和镜头
+	scenes, err := s.sceneRepo.FindByNarrationID(ctx, narration.ID)
+	if err != nil {
+		return nil, fmt.Errorf("find scenes: %w", err)
 	}
 
-	// 3. 从 Scenes[].Shots[] 中提取所有 Shots，按照顺序编号
+	if len(scenes) == 0 {
+		return nil, fmt.Errorf("no scenes found for narration")
+	}
+
+	// 3. 从 Scenes 和 Shots 中提取所有 Shots，按照顺序编号
 	var allShots []struct {
 		SceneNumber string
 		ShotNumber  string
-		Shot        *novel.NarrationShot
+		Shot        *novel.Shot
 		Index       int // narration 编号（从1开始）
 	}
 
 	narrationIndex := 1
-	for _, scene := range narration.Content.Scenes {
-		if scene == nil || len(scene.Shots) == 0 {
+	for _, scene := range scenes {
+		// 查询该场景下的所有镜头
+		shots, err := s.shotRepo.FindBySceneID(ctx, scene.ID)
+		if err != nil {
 			continue
 		}
-		for _, shot := range scene.Shots {
-			if shot == nil {
-				continue
-			}
+
+		for _, shot := range shots {
 			allShots = append(allShots, struct {
 				SceneNumber string
 				ShotNumber  string
-				Shot        *novel.NarrationShot
+				Shot        *novel.Shot
 				Index       int
 			}{
 				SceneNumber: scene.SceneNumber,
-				ShotNumber:  shot.CloseupNumber,
+				ShotNumber:  shot.ShotNumber,
 				Shot:        shot,
 				Index:       narrationIndex,
 			})
@@ -133,7 +139,7 @@ func (s *novelService) GenerateNarrationVideosForChapter(ctx context.Context, ch
 		go func(shotInfo struct {
 			SceneNumber string
 			ShotNumber  string
-			Shot        *novel.NarrationShot
+			Shot        *novel.Shot
 			Index       int
 		}, narrationNum string) {
 			defer wg.Done()
@@ -180,8 +186,8 @@ func (s *novelService) GenerateNarrationVideosForChapter(ctx context.Context, ch
 // DEPRECATED: 此函数已不再使用，narration_01-03 现在通过 generateMergedNarrationVideo 统一生成
 func (s *novelService) generateNarration01Video(
 	ctx context.Context,
-	narration *novel.ChapterNarration,
-	video1 *novel.ChapterVideo,
+	narration *novel.Narration,
+	video1 *novel.Video,
 	version int,
 	ffmpegClient *ffmpeg.Client,
 ) (string, error) {
@@ -221,14 +227,14 @@ func (s *novelService) replaceVideoAudio(ctx context.Context, videoPath, audioPa
 func (s *novelService) generateMergedNarrationVideo(
 	ctx context.Context,
 	chapterID string,
-	narration *novel.ChapterNarration,
+	narration *novel.Narration,
 	shots []struct {
 		SceneNumber string
 		ShotNumber  string
-		Shot        *novel.NarrationShot
+		Shot        *novel.Shot
 		Index       int
 	},
-	video1 *novel.ChapterVideo, // 保留参数以保持接口兼容，但不再使用
+	video1 *novel.Video, // 保留参数以保持接口兼容，但不再使用
 	version int,
 	ffmpegClient *ffmpeg.Client,
 ) (string, error) {
@@ -332,10 +338,10 @@ func (s *novelService) generateMergedNarrationVideo(
 	// 3.1 使用 image_01-03 按音频时长分配（每个图片对应一个音频片段）
 	// 收集所有图片的 prompt（用于视频记录）
 	var imagePrompts []string
-	var images []*novel.ChapterImage
+	var images []*novel.Image
 	for i, shotInfo := range shots {
 		// 根据 scene_number 和 shot_number 查找图片
-		image, err := s.chapterImageRepo.FindBySceneAndShot(ctx, chapterID, shotInfo.SceneNumber, shotInfo.ShotNumber)
+		image, err := s.imageRepo.FindBySceneAndShot(ctx, chapterID, shotInfo.SceneNumber, shotInfo.ShotNumber)
 		if err != nil {
 			return "", fmt.Errorf("find image for shot %d (scene=%s, shot=%s): %w", i+1, shotInfo.SceneNumber, shotInfo.ShotNumber, err)
 		}
@@ -494,7 +500,7 @@ func (s *novelService) generateMergedNarrationVideo(
 		videoPrompt = "图生视频（前3个场景合并）"
 	}
 
-	videoEntity := &novel.ChapterVideo{
+	videoEntity := &novel.Video{
 		ID:              videoID,
 		ChapterID:       chapterID,
 		NarrationID:     narration.ID,
@@ -519,11 +525,11 @@ func (s *novelService) generateMergedNarrationVideo(
 func (s *novelService) generateSingleNarrationVideo(
 	ctx context.Context,
 	chapterID string,
-	narration *novel.ChapterNarration,
+	narration *novel.Narration,
 	shotInfo struct {
 		SceneNumber string
 		ShotNumber  string
-		Shot        *novel.NarrationShot
+		Shot        *novel.Shot
 		Index       int
 	},
 	narrationNum string,
@@ -531,7 +537,7 @@ func (s *novelService) generateSingleNarrationVideo(
 	ffmpegClient *ffmpeg.Client,
 ) (string, error) {
 	// 1. 根据 scene_number 和 shot_number 查找图片
-	image, err := s.chapterImageRepo.FindBySceneAndShot(ctx, chapterID, shotInfo.SceneNumber, shotInfo.ShotNumber)
+	image, err := s.imageRepo.FindBySceneAndShot(ctx, chapterID, shotInfo.SceneNumber, shotInfo.ShotNumber)
 	if err != nil {
 		return "", fmt.Errorf("find image: %w", err)
 	}
@@ -543,7 +549,7 @@ func (s *novelService) generateSingleNarrationVideo(
 	}
 
 	// 找到对应 sequence 的音频（narration_04 对应 sequence=4）
-	var audio *novel.ChapterAudio
+	var audio *novel.Audio
 	for _, a := range audios {
 		if a.Sequence == shotInfo.Index {
 			audio = a
@@ -860,7 +866,7 @@ func (s *novelService) generateSingleNarrationVideo(
 
 	// videoPrompt 已经在前面（第 571 行）构建好了，这里直接使用
 
-	videoEntity := &novel.ChapterVideo{
+	videoEntity := &novel.Video{
 		ID:              videoID,
 		ChapterID:       chapterID,
 		NarrationID:     narration.ID,
@@ -1118,7 +1124,7 @@ func (s *novelService) GenerateFinalVideoForChapter(ctx context.Context, chapter
 	}
 
 	// 过滤出 narration_video 类型的视频
-	var filteredNarrationVideos []*novel.ChapterVideo
+	var filteredNarrationVideos []*novel.Video
 	for _, video := range narrationVideos {
 		if video.VideoType == "narration_video" {
 			filteredNarrationVideos = append(filteredNarrationVideos, video)
@@ -1268,7 +1274,7 @@ func (s *novelService) GenerateFinalVideoForChapter(ctx context.Context, chapter
 	// 10. 创建最终视频记录
 	// 使用与 narration 视频相同的版本号（已在前面获取）
 	videoID := id.New()
-	videoEntity := &novel.ChapterVideo{
+	videoEntity := &novel.Video{
 		ID:              videoID,
 		ChapterID:       chapterID,
 		UserID:          chapter.UserID,
@@ -1293,7 +1299,7 @@ func (s *novelService) GetVideoVersions(ctx context.Context, chapterID string) (
 }
 
 // GetVideosByStatus 根据状态查询视频（用于轮询）
-func (s *novelService) GetVideosByStatus(ctx context.Context, status string) ([]*novel.ChapterVideo, error) {
+func (s *novelService) GetVideosByStatus(ctx context.Context, status string) ([]*novel.Video, error) {
 	return s.videoRepo.FindByStatus(ctx, status)
 }
 

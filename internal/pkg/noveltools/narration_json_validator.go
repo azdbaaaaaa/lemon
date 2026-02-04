@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-
-	"lemon/internal/model/novel"
 )
 
 // cleanJSONContent 清理 LLM 返回的 JSON 内容
@@ -37,9 +35,32 @@ func cleanJSONContent(content string) string {
 	return content
 }
 
+// NarrationJSONContent 临时结构体，用于解析 JSON（不保存到数据库）
+// 注意：这些结构体仅用于解析 LLM 返回的 JSON，解析后会转换为 Scene 和 Shot 实体保存到数据库
+type NarrationJSONContent struct {
+	Scenes []*NarrationJSONScene `json:"scenes"`
+}
+
+// NarrationJSONScene 临时场景结构体
+type NarrationJSONScene struct {
+	SceneNumber string              `json:"scene_number"`
+	Narration   string              `json:"narration,omitempty"`
+	Shots       []*NarrationJSONShot `json:"shots"`
+}
+
+// NarrationJSONShot 临时镜头结构体
+type NarrationJSONShot struct {
+	CloseupNumber string `json:"closeup_number"`
+	Character     string `json:"character"`
+	Narration     string `json:"narration"`
+	ScenePrompt   string `json:"scene_prompt"`
+	VideoPrompt   string `json:"video_prompt"`
+}
+
 // ValidateNarrationJSON 验证 JSON 格式的解说文案
 // 返回解析后的结构化数据和验证结果
-func ValidateNarrationJSON(jsonContent string, minLength, maxLength int) (*novel.NarrationContent, *ValidationResult) {
+// 注意：此函数现在返回临时结构体，不再返回 NarrationContent（已移除）
+func ValidateNarrationJSON(jsonContent string, minLength, maxLength int) (*NarrationJSONContent, *ValidationResult) {
 	result := &ValidationResult{
 		IsValid:  true,
 		Warnings: make([]string, 0),
@@ -56,7 +77,7 @@ func ValidateNarrationJSON(jsonContent string, minLength, maxLength int) (*novel
 	}
 
 	// 尝试解析 JSON 到结构体
-	var content novel.NarrationContent
+	var content NarrationJSONContent
 	if err := json.Unmarshal([]byte(jsonContent), &content); err != nil {
 		result.IsValid = false
 		result.Message = fmt.Sprintf("JSON 解析失败: %v", err)
@@ -166,4 +187,15 @@ func countChineseCharacters(text string) int {
 		}
 	}
 	return count
+}
+
+// ParseNarrationJSON 解析 JSON 格式的解说文案
+// 使用 ValidateNarrationJSON 进行解析和验证
+func ParseNarrationJSON(jsonContent string) (*NarrationJSONContent, error) {
+	// 使用验证函数来解析和验证 JSON
+	content, validationResult := ValidateNarrationJSON(jsonContent, 1100, 1300)
+	if !validationResult.IsValid {
+		return nil, fmt.Errorf("narration validation failed: %s", validationResult.Message)
+	}
+	return content, nil
 }

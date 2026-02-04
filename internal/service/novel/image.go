@@ -33,8 +33,14 @@ func (s *novelService) GenerateImagesForNarration(ctx context.Context, narration
 		return nil, fmt.Errorf("find narration: %w", err)
 	}
 
-	if narration.Content == nil {
-		return nil, fmt.Errorf("narration content is nil")
+	// 2. 从独立的表中查询场景和镜头
+	scenes, err := s.sceneRepo.FindByNarrationID(ctx, narrationID)
+	if err != nil {
+		return nil, fmt.Errorf("find scenes: %w", err)
+	}
+
+	if len(scenes) == 0 {
+		return nil, fmt.Errorf("no scenes found for narration")
 	}
 
 	// 2. 自动生成下一个版本号（基于章节ID，独立递增）
@@ -72,25 +78,35 @@ func (s *novelService) GenerateImagesForNarration(ctx context.Context, narration
 	// 6. 初始化 Prompt 构建器
 	promptBuilder := noveltools.NewImagePromptBuilder()
 
-	// 7. 遍历所有场景和特写，生成图片
+	// 7. 遍历所有场景和镜头，生成图片
 	var imageIDs []string
 	sequence := 1
 
-	for _, scene := range narration.Content.Scenes {
-		for _, shot := range scene.Shots {
+	for _, scene := range scenes {
+		// 查询该场景下的所有镜头
+		shots, err := s.shotRepo.FindBySceneID(ctx, scene.ID)
+		if err != nil {
+			log.Error().
+				Err(err).
+				Str("scene_id", scene.ID).
+				Msg("查询镜头失败，跳过该场景")
+			continue
+		}
+
+		for _, shot := range shots {
 			// 查找角色信息
 			character, ok := characterMap[shot.Character]
 			if !ok {
 				log.Warn().
 					Str("character", shot.Character).
 					Str("scene", scene.SceneNumber).
-					Str("shot", shot.CloseupNumber).
+					Str("shot", shot.ShotNumber).
 					Msg("角色信息未找到，跳过")
 				continue
 			}
 
 			// 生成单张图片
-			imageID, err := s.generateSingleChapterImage(
+			imageID, err := s.generateSingleImage(
 				ctx,
 				narration,
 				chapter,
@@ -106,7 +122,7 @@ func (s *novelService) GenerateImagesForNarration(ctx context.Context, narration
 				log.Error().
 					Err(err).
 					Str("scene", scene.SceneNumber).
-					Str("shot", shot.CloseupNumber).
+					Str("shot", shot.ShotNumber).
 					Msg("生成图片失败")
 				continue
 			}
@@ -120,12 +136,12 @@ func (s *novelService) GenerateImagesForNarration(ctx context.Context, narration
 }
 
 // generateSingleChapterImage 生成单张章节图片（私有方法）
-func (s *novelService) generateSingleChapterImage(
+func (s *novelService) generateSingleImage(
 	ctx context.Context,
-	narration *novel.ChapterNarration,
+	narration *novel.Narration,
 	chapter *novel.Chapter,
-	scene *novel.NarrationScene,
-	shot *novel.NarrationShot,
+	scene *novel.Scene,
+	shot *novel.Shot,
 	character *novel.Character,
 	imageProvider noveltools.ImageProvider,
 	promptBuilder *noveltools.ImagePromptBuilder,
@@ -160,12 +176,12 @@ func (s *novelService) generateSingleChapterImage(
 
 	// 9. 保存 ChapterImage 记录
 	imageID := id.New()
-	chapterImage := &novel.ChapterImage{
+	chapterImage := &novel.Image{
 		ID:              imageID,
 		ChapterID:       chapter.ID,
 		NarrationID:     narration.ID,
 		SceneNumber:     scene.SceneNumber,
-		ShotNumber:      shot.CloseupNumber,
+		ShotNumber:      shot.ShotNumber,
 		ImageResourceID: uploadResult.ResourceID,
 		CharacterName:   shot.Character,
 		Prompt:          completePrompt,
@@ -174,7 +190,7 @@ func (s *novelService) generateSingleChapterImage(
 		Sequence:        sequence,
 	}
 
-	if err := s.chapterImageRepo.Create(ctx, chapterImage); err != nil {
+	if err := s.imageRepo.Create(ctx, chapterImage); err != nil {
 		return "", fmt.Errorf("create chapter image: %w", err)
 	}
 
@@ -182,7 +198,7 @@ func (s *novelService) generateSingleChapterImage(
 		Str("image_id", imageID).
 		Str("chapter_id", chapter.ID).
 		Str("scene", scene.SceneNumber).
-		Str("shot", shot.CloseupNumber).
+		Str("shot", shot.ShotNumber).
 		Msg("章节图片生成成功")
 
 	return imageID, nil
@@ -192,7 +208,7 @@ func (s *novelService) generateSingleChapterImage(
 // chapterID: 章节ID
 // baseVersion: 基础版本号（如 1），如果为0则自动生成下一个版本号
 func (s *novelService) getNextImageVersion(ctx context.Context, chapterID string, baseVersion int) (int, error) {
-	versions, err := s.chapterImageRepo.FindVersionsByChapterID(ctx, chapterID)
+	versions, err := s.imageRepo.FindVersionsByChapterID(ctx, chapterID)
 	if err != nil {
 		// 如果没有找到任何版本，返回 1 或基础版本号
 		if baseVersion == 0 {

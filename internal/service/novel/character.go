@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"go.mongodb.org/mongo-driver/bson"
-
 	"lemon/internal/model/novel"
 	"lemon/internal/pkg/id"
 )
@@ -25,58 +23,43 @@ type CharacterService interface {
 
 // SyncCharactersFromNarration 从章节解说同步角色信息到小说级别
 func (s *novelService) SyncCharactersFromNarration(ctx context.Context, novelID, narrationID string) error {
-	narration, err := s.narrationRepo.FindByID(ctx, narrationID)
+	// 从独立的表中查询所有镜头，提取角色信息
+	shots, err := s.shotRepo.FindByNarrationID(ctx, narrationID)
 	if err != nil {
-		return fmt.Errorf("find chapter narration: %w", err)
+		return fmt.Errorf("find shots: %w", err)
 	}
 
-	if narration.Content == nil || narration.Content.Characters == nil {
-		return nil
+	// 收集所有唯一的角色名称
+	characterMap := make(map[string]bool)
+	for _, shot := range shots {
+		if shot.Character != "" {
+			characterMap[shot.Character] = true
+		}
 	}
 
-	for _, narrationChar := range narration.Content.Characters {
+	// 为每个角色创建或更新角色记录
+	for characterName := range characterMap {
 		// 检查是否已存在同名角色
-		existing, err := s.characterRepo.FindByNameAndNovelID(ctx, narrationChar.Name, novelID)
+		existing, err := s.characterRepo.FindByNameAndNovelID(ctx, characterName, novelID)
 		if err != nil && err.Error() != "mongo: no documents in result" {
 			// 忽略"未找到"错误，继续创建新角色
 			continue
 		}
 
-		if existing != nil {
-			// 更新现有角色信息（合并外貌特征等）
-			updates := bson.M{}
-			if narrationChar.Gender != "" {
-				updates["gender"] = narrationChar.Gender
-			}
-			if narrationChar.AgeGroup != "" {
-				updates["age_group"] = narrationChar.AgeGroup
-			}
-			if narrationChar.RoleNumber != "" {
-				updates["role_number"] = narrationChar.RoleNumber
-			}
-
-			// 注意：这里简化处理，实际应该从 NarrationCharacter 中提取更详细的外貌和服装信息
-			// 但由于 NarrationCharacter 结构较简单，这里只更新基本信息
-			if err := s.characterRepo.Update(ctx, existing.ID, updates); err != nil {
-				return fmt.Errorf("update character %s: %w", existing.ID, err)
-			}
-		} else {
-			// 创建新角色
+		if existing == nil {
+			// 创建新角色（基本信息，详细外貌信息需要后续补充）
 			character := &novel.Character{
-				ID:         id.New(),
-				NovelID:    novelID,
-				Name:       narrationChar.Name,
-				Gender:     narrationChar.Gender,
-				AgeGroup:   narrationChar.AgeGroup,
-				RoleNumber: narrationChar.RoleNumber,
-				// 注意：NarrationCharacter 中没有详细的外貌和服装信息
-				// 这些信息需要从其他来源获取，或者后续通过其他方式补充
+				ID:      id.New(),
+				NovelID: novelID,
+				Name:    characterName,
+				// 注意：从 Shot 表中只能获取角色名称，其他信息（性别、年龄等）需要后续补充
 			}
 
 			if err := s.characterRepo.Create(ctx, character); err != nil {
 				return fmt.Errorf("create character %s: %w", character.Name, err)
 			}
 		}
+		// 如果角色已存在，不需要更新（因为 Shot 表中只有角色名称，没有其他信息）
 	}
 
 	return nil

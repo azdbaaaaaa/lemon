@@ -181,7 +181,7 @@ func waitForVideosComplete(ctx context.Context, t *testing.T, services *TestServ
 			t.Fatalf("上下文已取消")
 		case <-ticker.C:
 			// 直接查询数据库获取视频状态
-			var videoModel novel.ChapterVideo
+			var videoModel novel.Video
 			videoColl := testDB.Collection(videoModel.Collection())
 			videoFilter := bson.M{"chapter_id": chapterID, "video_type": videoType, "deleted_at": nil}
 			cursor, err := videoColl.Find(ctx, videoFilter, options.Find().SetSort(bson.M{"sequence": 1}))
@@ -191,7 +191,7 @@ func waitForVideosComplete(ctx context.Context, t *testing.T, services *TestServ
 			}
 			defer cursor.Close(ctx)
 
-			var videos []*novel.ChapterVideo
+			var videos []*novel.Video
 			if err := cursor.All(ctx, &videos); err != nil {
 				t.Logf("解析视频数据失败: %v", err)
 				continue

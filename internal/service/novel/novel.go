@@ -27,19 +27,21 @@ type NovelService interface {
 
 // novelService 小说服务实现
 type novelService struct {
-	resourceService  service.ResourceService
-	novelRepo        novelrepo.NovelRepository
-	chapterRepo      novelrepo.ChapterRepository
-	narrationRepo    novelrepo.ChapterNarrationRepository
-	audioRepo        novelrepo.ChapterAudioRepository
-	subtitleRepo     novelrepo.ChapterSubtitleRepository
-	characterRepo    novelrepo.CharacterRepository
-	chapterImageRepo novelrepo.ChapterImageRepository
-	videoRepo        novelrepo.ChapterVideoRepository
-	llmProvider      noveltools.LLMProvider
-	ttsProvider      noveltools.TTSProvider
-	imageProvider    noveltools.ImageProvider
-	videoProvider    noveltools.VideoProvider
+	resourceService service.ResourceService
+	novelRepo       novelrepo.NovelRepository
+	chapterRepo     novelrepo.ChapterRepository
+	narrationRepo   novelrepo.NarrationRepository
+	sceneRepo       novelrepo.SceneRepository
+	shotRepo        novelrepo.ShotRepository
+	audioRepo       novelrepo.AudioRepository
+	subtitleRepo    novelrepo.SubtitleRepository
+	characterRepo   novelrepo.CharacterRepository
+	imageRepo       novelrepo.ImageRepository
+	videoRepo       novelrepo.VideoRepository
+	llmProvider     noveltools.LLMProvider
+	ttsProvider     noveltools.TTSProvider
+	imageProvider   noveltools.ImageProvider
+	videoProvider   noveltools.VideoProvider
 }
 
 // NewNovelService 创建小说服务
@@ -51,12 +53,14 @@ func NewNovelService(
 	// 初始化所有 repository
 	novelRepo := novelrepo.NewNovelRepo(db)
 	chapterRepo := novelrepo.NewChapterRepo(db)
-	narrationRepo := novelrepo.NewChapterNarrationRepo(db)
-	audioRepo := novelrepo.NewChapterAudioRepo(db)
-	subtitleRepo := novelrepo.NewChapterSubtitleRepo(db)
+	narrationRepo := novelrepo.NewNarrationRepo(db)
+	sceneRepo := novelrepo.NewSceneRepo(db)
+	shotRepo := novelrepo.NewShotRepo(db)
+	audioRepo := novelrepo.NewAudioRepo(db)
+	subtitleRepo := novelrepo.NewSubtitleRepo(db)
 	characterRepo := novelrepo.NewCharacterRepo(db)
-	chapterImageRepo := novelrepo.NewChapterImageRepo(db)
-	videoRepo := novelrepo.NewChapterVideoRepo(db)
+	imageRepo := novelrepo.NewImageRepo(db)
+	videoRepo := novelrepo.NewVideoRepo(db)
 
 	// 初始化 LLM Provider（从环境变量读取配置）
 	aiCfg := ark.ArkConfigFromEnv()
@@ -89,18 +93,20 @@ func NewNovelService(
 	}
 
 	return &novelService{
-		resourceService:  resourceService,
-		novelRepo:        novelRepo,
-		chapterRepo:      chapterRepo,
-		narrationRepo:    narrationRepo,
-		audioRepo:        audioRepo,
-		subtitleRepo:     subtitleRepo,
-		characterRepo:    characterRepo,
-		chapterImageRepo: chapterImageRepo,
-		videoRepo:        videoRepo,
-		llmProvider:      llmProvider,
-		ttsProvider:      ttsProvider,
-		imageProvider:    imageProvider,
-		videoProvider:    videoProvider,
+		resourceService: resourceService,
+		novelRepo:       novelRepo,
+		chapterRepo:     chapterRepo,
+		narrationRepo:   narrationRepo,
+		sceneRepo:       sceneRepo,
+		shotRepo:        shotRepo,
+		audioRepo:       audioRepo,
+		subtitleRepo:    subtitleRepo,
+		characterRepo:   characterRepo,
+		imageRepo:       imageRepo,
+		videoRepo:       videoRepo,
+		llmProvider:     llmProvider,
+		ttsProvider:     ttsProvider,
+		imageProvider:   imageProvider,
+		videoProvider:   videoProvider,
 	}, nil
 }

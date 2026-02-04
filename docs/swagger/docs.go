@@ -259,6 +259,653 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/novels": {
+            "post": {
+                "description": "根据资源ID创建小说，返回小说ID。这是小说处理流程的第一步。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "小说管理"
+                ],
+                "summary": "创建小说",
+                "parameters": [
+                    {
+                        "description": "创建小说请求",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/novel.CreateNovelRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"小说创建成功\\\", \\\"data\\\": {\\\"novel_id\\\": \\\"...\\\"}}",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/novel.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器内部错误",
+                        "schema": {
+                            "$ref": "#/definitions/novel.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/novels/chapters/{chapter_id}/videos/final": {
+            "post": {
+                "description": "拼接所有 narration 视频，添加 finish.mp4，生成章节的最终完整视频。需要确保所有 narration 视频已完成（status=completed）。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "视频生成"
+                ],
+                "summary": "生成章节的最终完整视频",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "章节ID",
+                        "name": "chapter_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"最终视频生成成功\\\", \\\"data\\\": {\\\"video_id\\\": \\\"...\\\", \\\"chapter_id\\\": \\\"...\\\"}}",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误（如没有找到 narration 视频）",
+                        "schema": {
+                            "$ref": "#/definitions/novel.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器内部错误",
+                        "schema": {
+                            "$ref": "#/definitions/novel.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/novels/chapters/{chapter_id}/videos/narration": {
+            "post": {
+                "description": "为章节生成所有 narration 视频，所有分镜都单独生成视频，使用图生视频方式（Ark API 或 FFmpeg）。视频生成是异步的，提交任务后需要通过状态查询接口轮询进度。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "视频生成"
+                ],
+                "summary": "生成章节的 narration 视频",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "章节ID",
+                        "name": "chapter_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"视频生成任务已提交\\\", \\\"data\\\": {\\\"video_ids\\\": [\\\"...\\\"], \\\"count\\\": 1, \\\"chapter_id\\\": \\\"...\\\"}}",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/novel.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器内部错误",
+                        "schema": {
+                            "$ref": "#/definitions/novel.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/novels/chapters/{chapter_id}/videos/versions": {
+            "get": {
+                "description": "获取章节的所有视频版本号，用于查看历史版本或选择特定版本。每次生成视频都会创建新版本。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "视频查询"
+                ],
+                "summary": "获取章节的视频版本号列表",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "章节ID",
+                        "name": "chapter_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"success\\\", \\\"data\\\": {\\\"versions\\\": [1, 2, 3], \\\"count\\\": 3, \\\"chapter_id\\\": \\\"...\\\"}}",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/novel.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器内部错误",
+                        "schema": {
+                            "$ref": "#/definitions/novel.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/novels/{novel_id}": {
+            "get": {
+                "description": "根据小说ID获取小说的详细信息",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "小说管理"
+                ],
+                "summary": "获取小说信息",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "小说ID",
+                        "name": "novel_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"success\\\", \\\"data\\\": {\\\"novel\\\": {...}}}",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/novel.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "小说不存在",
+                        "schema": {
+                            "$ref": "#/definitions/novel.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器内部错误",
+                        "schema": {
+                            "$ref": "#/definitions/novel.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/novels/{novel_id}/chapters": {
+            "get": {
+                "description": "根据小说ID获取该小说的所有章节列表，按序号排序",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "章节管理"
+                ],
+                "summary": "获取章节列表",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "小说ID",
+                        "name": "novel_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"success\\\", \\\"data\\\": {\\\"novel_id\\\": \\\"...\\\", \\\"chapters\\\": [...], \\\"count\\\": 10}}",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/novel.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器内部错误",
+                        "schema": {
+                            "$ref": "#/definitions/novel.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/novels/{novel_id}/chapters/split": {
+            "post": {
+                "description": "根据小说内容切分章节，将小说文本按照目标章节数切分成多个章节。这是小说处理流程的第二步。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "章节管理"
+                ],
+                "summary": "切分章节",
+                "parameters": [
+                    {
+                        "description": "切分章节请求",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/novel.SplitChaptersRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"章节切分成功\\\", \\\"data\\\": {\\\"novel_id\\\": \\\"...\\\", \\\"target_chapters\\\": 10, \\\"message\\\": \\\"已切分为 10 个章节\\\"}}",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/novel.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器内部错误",
+                        "schema": {
+                            "$ref": "#/definitions/novel.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/resources": {
+            "get": {
+                "description": "查询资源列表，支持按用户ID、扩展名、状态等条件筛选，支持分页",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "资源管理"
+                ],
+                "summary": "查询资源列表",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "用户ID",
+                        "name": "user_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "文件扩展名筛选",
+                        "name": "ext",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "状态筛选",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页码（默认1）",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量（默认20，最大100）",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"success\\\", \\\"data\\\": {\\\"resources\\\": [...], \\\"total\\\": 100, \\\"page\\\": 1, \\\"page_size\\\": 20}}",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/resource.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器内部错误",
+                        "schema": {
+                            "$ref": "#/definitions/resource.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/resources/upload": {
+            "post": {
+                "description": "通过 multipart/form-data 上传文件到服务端，服务端会保存文件并创建资源记录",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "资源管理"
+                ],
+                "summary": "上传文件",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "上传的文件",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "用户ID（可选，如果为空则从认证信息中获取）",
+                        "name": "user_id",
+                        "in": "formData"
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"文件上传成功\\\", \\\"data\\\": {\\\"resource_id\\\": \\\"...\\\", \\\"resource_url\\\": \\\"...\\\", \\\"file_size\\\": 1024, \\\"file_name\\\": \\\"...\\\"}}",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/resource.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器内部错误",
+                        "schema": {
+                            "$ref": "#/definitions/resource.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/resources/{resource_id}": {
+            "get": {
+                "description": "根据资源ID获取资源的详细信息（元数据，不包含文件内容）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "资源管理"
+                ],
+                "summary": "获取资源信息",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "资源ID",
+                        "name": "resource_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"success\\\", \\\"data\\\": {\\\"resource\\\": {...}}}",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/resource.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "资源不存在",
+                        "schema": {
+                            "$ref": "#/definitions/resource.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器内部错误",
+                        "schema": {
+                            "$ref": "#/definitions/resource.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/resources/{resource_id}/download": {
+            "get": {
+                "description": "根据资源ID下载文件，返回文件流",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "资源管理"
+                ],
+                "summary": "下载文件",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "资源ID",
+                        "name": "resource_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "文件流",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/resource.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "资源不存在",
+                        "schema": {
+                            "$ref": "#/definitions/resource.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器内部错误",
+                        "schema": {
+                            "$ref": "#/definitions/resource.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/resources/{resource_id}/download-url": {
+            "get": {
+                "description": "根据资源ID获取预签名的下载URL，适用于客户端直接下载",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "资源管理"
+                ],
+                "summary": "获取下载URL",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "资源ID",
+                        "name": "resource_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "过期时间（秒，默认3600）",
+                        "name": "expires_in",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"success\\\", \\\"data\\\": {\\\"resource_id\\\": \\\"...\\\", \\\"download_url\\\": \\\"...\\\", \\\"expires_at\\\": \\\"...\\\", \\\"file_name\\\": \\\"...\\\", \\\"file_size\\\": 1024, \\\"content_type\\\": \\\"...\\\"}}",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/resource.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "资源不存在",
+                        "schema": {
+                            "$ref": "#/definitions/resource.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器内部错误",
+                        "schema": {
+                            "$ref": "#/definitions/resource.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/videos": {
+            "get": {
+                "description": "根据状态查询视频列表，用于轮询视频生成进度。支持的状态：pending（待处理）、processing（处理中）、completed（已完成）、failed（失败）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "视频查询"
+                ],
+                "summary": "根据状态查询视频",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "视频状态：pending, processing, completed, failed",
+                        "name": "status",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"success\\\", \\\"data\\\": {\\\"videos\\\": [...], \\\"count\\\": 1, \\\"status\\\": \\\"pending\\\"}}",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误（如 status 参数无效）",
+                        "schema": {
+                            "$ref": "#/definitions/novel.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器内部错误",
+                        "schema": {
+                            "$ref": "#/definitions/novel.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/health": {
             "get": {
                 "description": "检查服务健康状态",
@@ -317,12 +964,15 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "code": {
+                    "description": "错误码（非0表示错误）",
                     "type": "integer"
                 },
                 "detail": {
+                    "description": "错误详情（可选）",
                     "type": "string"
                 },
                 "message": {
+                    "description": "错误消息",
                     "type": "string"
                 }
             }
@@ -382,6 +1032,80 @@ const docTemplate = `{
                     "type": "string",
                     "maxLength": 50,
                     "minLength": 3
+                }
+            }
+        },
+        "novel.CreateNovelRequest": {
+            "type": "object",
+            "required": [
+                "resource_id",
+                "user_id",
+                "workflow_id"
+            ],
+            "properties": {
+                "resource_id": {
+                    "description": "资源ID（必填）",
+                    "type": "string"
+                },
+                "user_id": {
+                    "description": "用户ID（必填）",
+                    "type": "string"
+                },
+                "workflow_id": {
+                    "description": "工作流ID（必填）",
+                    "type": "string"
+                }
+            }
+        },
+        "novel.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "description": "错误码（非0表示错误）",
+                    "type": "integer"
+                },
+                "detail": {
+                    "description": "错误详情（可选）",
+                    "type": "string"
+                },
+                "message": {
+                    "description": "错误消息",
+                    "type": "string"
+                }
+            }
+        },
+        "novel.SplitChaptersRequest": {
+            "type": "object",
+            "required": [
+                "novel_id",
+                "target_chapters"
+            ],
+            "properties": {
+                "novel_id": {
+                    "description": "小说ID（必填）",
+                    "type": "string"
+                },
+                "target_chapters": {
+                    "description": "目标章节数（必填，至少1章）",
+                    "type": "integer",
+                    "minimum": 1
+                }
+            }
+        },
+        "resource.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "description": "错误码（非0表示错误）",
+                    "type": "integer"
+                },
+                "detail": {
+                    "description": "错误详情（可选）",
+                    "type": "string"
+                },
+                "message": {
+                    "description": "错误消息",
+                    "type": "string"
                 }
             }
         }
