@@ -22,6 +22,9 @@ type ImageService interface {
 
 	// GetImageVersions 获取章节的所有图片版本号
 	GetImageVersions(ctx context.Context, chapterID string) ([]int, error)
+
+	// ListImagesByNarration 获取解说的图片列表（可指定版本；version<=0 则取最新版本）
+	ListImagesByNarration(ctx context.Context, narrationID string, version int) ([]*novel.Image, int, error)
 }
 
 // GenerateImagesForNarration 为章节解说生成所有章节图片
@@ -180,6 +183,7 @@ func (s *novelService) generateSingleImage(
 		ID:              imageID,
 		ChapterID:       chapter.ID,
 		NarrationID:     narration.ID,
+		WorkflowID:      chapter.WorkflowID,
 		SceneNumber:     scene.SceneNumber,
 		ShotNumber:      shot.ShotNumber,
 		ImageResourceID: uploadResult.ResourceID,

@@ -24,6 +24,9 @@ type SubtitleService interface {
 
 	// GetSubtitleVersions 获取章节的所有字幕版本号
 	GetSubtitleVersions(ctx context.Context, chapterID string) ([]int, error)
+
+	// ListSubtitlesByNarration 获取解说的字幕列表（可指定版本；version<=0 则取最新版本）
+	ListSubtitlesByNarration(ctx context.Context, narrationID string, version int) ([]*novel.Subtitle, int, error)
 }
 
 // GenerateSubtitlesForNarration 为章节解说生成所有字幕文件（ASS格式）
@@ -234,12 +237,19 @@ func (s *novelService) generateSingleSubtitle(
 	// 8. 构建章节字幕生成参数提示词
 	subtitlePrompt := fmt.Sprintf("字幕生成参数: maxLength=%d, format=ass, segmentCount=%d", maxLength, len(segmentTimestamps))
 
+	// 获取章节信息以获取 workflow_id
+	chapter, err := s.chapterRepo.FindByID(ctx, narration.ChapterID)
+	if err != nil {
+		return "", fmt.Errorf("find chapter: %w", err)
+	}
+
 	// 9. 创建 chapter_subtitle 记录
 	subtitleID := id.New()
 	subtitleEntity := &novel.Subtitle{
 		ID:                 subtitleID,
 		ChapterID:          narration.ChapterID,
 		NarrationID:        narration.ID,
+		WorkflowID:         chapter.WorkflowID,
 		UserID:             narration.UserID,
 		Sequence:           sequence,
 		SubtitleResourceID: resourceID,

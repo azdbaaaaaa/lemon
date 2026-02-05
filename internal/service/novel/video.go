@@ -34,11 +34,17 @@ type VideoService interface {
 	// 拼接所有 narration 视频，添加 finish.mp4
 	GenerateFinalVideoForChapter(ctx context.Context, chapterID string) (string, error)
 
+	// GenerateFinalVideoForChapterWithVersion 指定 narration 视频版本号，手动确认后再合并生成最终视频
+	GenerateFinalVideoForChapterWithVersion(ctx context.Context, chapterID string, version int) (string, error)
+
 	// GetVideoVersions 获取章节的所有视频版本号
 	GetVideoVersions(ctx context.Context, chapterID string) ([]int, error)
 
 	// GetVideosByStatus 根据状态查询视频（用于轮询）
 	GetVideosByStatus(ctx context.Context, status novel.VideoStatus) ([]*novel.Video, error)
+
+	// ListVideosByChapter 获取章节视频列表（可指定版本；version<=0 则取最新版本）
+	ListVideosByChapter(ctx context.Context, chapterID string, version int) ([]*novel.Video, int, error)
 }
 
 // GenerateFirstVideosForChapter 已废弃：现在所有视频都使用图生视频方式，不再需要 first_video
@@ -500,10 +506,17 @@ func (s *novelService) generateMergedNarrationVideo(
 		videoPrompt = "图生视频（前3个场景合并）"
 	}
 
+	// 获取章节信息以获取 workflow_id
+	chapter, err := s.chapterRepo.FindByID(ctx, chapterID)
+	if err != nil {
+		return "", fmt.Errorf("find chapter: %w", err)
+	}
+
 	videoEntity := &novel.Video{
 		ID:              videoID,
 		ChapterID:       chapterID,
 		NarrationID:     narration.ID,
+		WorkflowID:      chapter.WorkflowID,
 		UserID:          narration.UserID,
 		Sequence:        1, // 合并视频的 sequence 为 1
 		VideoResourceID: uploadResult.ResourceID,
@@ -866,10 +879,17 @@ func (s *novelService) generateSingleNarrationVideo(
 
 	// videoPrompt 已经在前面（第 571 行）构建好了，这里直接使用
 
+	// 获取章节信息以获取 workflow_id
+	chapter, err := s.chapterRepo.FindByID(ctx, chapterID)
+	if err != nil {
+		return "", fmt.Errorf("find chapter: %w", err)
+	}
+
 	videoEntity := &novel.Video{
 		ID:              videoID,
 		ChapterID:       chapterID,
 		NarrationID:     narration.ID,
+		WorkflowID:      chapter.WorkflowID,
 		UserID:          narration.UserID,
 		Sequence:        sequence,
 		VideoResourceID: uploadResult.ResourceID,
@@ -1089,38 +1109,30 @@ func adjustDialogueTime(dialogueLine string, timeOffset float64) string {
 // GenerateFinalVideoForChapter 生成章节的最终完整视频
 // 对应 Python: concat_finish_video.py
 func (s *novelService) GenerateFinalVideoForChapter(ctx context.Context, chapterID string) (string, error) {
+	return s.GenerateFinalVideoForChapterWithVersion(ctx, chapterID, 0)
+}
+
+func (s *novelService) GenerateFinalVideoForChapterWithVersion(ctx context.Context, chapterID string, version int) (string, error) {
+	return s.generateFinalVideoForChapter(ctx, chapterID, version)
+}
+
+func (s *novelService) generateFinalVideoForChapter(ctx context.Context, chapterID string, version int) (string, error) {
 	// 1. 获取章节信息
 	chapter, err := s.chapterRepo.FindByID(ctx, chapterID)
 	if err != nil {
 		return "", fmt.Errorf("find chapter: %w", err)
 	}
 
-	// 2. 获取章节的所有视频版本号，找到最新版本
-	videoVersions, err := s.videoRepo.FindVersionsByChapterID(ctx, chapterID)
+	// 2. 确定要合并的版本号：version<=0 则取最新版本
+	videoVersion, err := s.resolveVideoVersion(ctx, chapterID, version)
 	if err != nil {
-		return "", fmt.Errorf("find video versions: %w", err)
+		return "", fmt.Errorf("resolve video version: %w", err)
 	}
 
-	if len(videoVersions) == 0 {
-		return "", fmt.Errorf("no videos found for chapter %s", chapterID)
-	}
-
-	// 找到最新版本号
-	maxVersion := 0
-	for _, v := range videoVersions {
-		if v > maxVersion {
-			maxVersion = v
-		}
-	}
-
-	if maxVersion == 0 {
-		return "", fmt.Errorf("no valid video version found for chapter %s", chapterID)
-	}
-
-	// 2.5. 只获取最新版本的 narration 视频（确保只合并最新版本的视频）
-	narrationVideos, err := s.videoRepo.FindByChapterIDAndVersion(ctx, chapterID, maxVersion)
+	// 2.5. 只获取指定版本的 narration 视频（确保只合并目标版本的视频）
+	narrationVideos, err := s.videoRepo.FindByChapterIDAndVersion(ctx, chapterID, videoVersion)
 	if err != nil {
-		return "", fmt.Errorf("find narration videos for version %d: %w", maxVersion, err)
+		return "", fmt.Errorf("find narration videos for version %d: %w", videoVersion, err)
 	}
 
 	// 过滤出 narration_video 类型的视频
@@ -1132,7 +1144,7 @@ func (s *novelService) GenerateFinalVideoForChapter(ctx context.Context, chapter
 	}
 
 	if len(filteredNarrationVideos) == 0 {
-		return "", fmt.Errorf("no narration videos found for chapter %s, version %d", chapterID, maxVersion)
+		return "", fmt.Errorf("no narration videos found for chapter %s, version %d", chapterID, videoVersion)
 	}
 
 	// 按 sequence 排序
@@ -1141,13 +1153,12 @@ func (s *novelService) GenerateFinalVideoForChapter(ctx context.Context, chapter
 	})
 
 	narrationVideos = filteredNarrationVideos
-	videoVersion := maxVersion
 
 	log.Info().
 		Str("chapter_id", chapterID).
 		Int("version", videoVersion).
 		Int("narration_video_count", len(narrationVideos)).
-		Msg("使用最新版本的 narration 视频进行合并")
+		Msg("使用指定版本的 narration 视频进行合并")
 
 	// 3. 初始化 FFmpeg 客户端
 	ffmpegClient := ffmpeg.NewClient()
@@ -1277,6 +1288,7 @@ func (s *novelService) GenerateFinalVideoForChapter(ctx context.Context, chapter
 	videoEntity := &novel.Video{
 		ID:              videoID,
 		ChapterID:       chapterID,
+		WorkflowID:      chapter.WorkflowID,
 		UserID:          chapter.UserID,
 		Sequence:        1,
 		VideoResourceID: uploadResult.ResourceID,

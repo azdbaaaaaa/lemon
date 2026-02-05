@@ -23,6 +23,12 @@ type CharacterService interface {
 
 // SyncCharactersFromNarration 从章节解说同步角色信息到小说级别
 func (s *novelService) SyncCharactersFromNarration(ctx context.Context, novelID, narrationID string) error {
+	// 获取小说信息以获取 workflow_id
+	novelEntity, err := s.novelRepo.FindByID(ctx, novelID)
+	if err != nil {
+		return fmt.Errorf("find novel: %w", err)
+	}
+
 	// 从独立的表中查询所有镜头，提取角色信息
 	shots, err := s.shotRepo.FindByNarrationID(ctx, narrationID)
 	if err != nil {
@@ -49,9 +55,10 @@ func (s *novelService) SyncCharactersFromNarration(ctx context.Context, novelID,
 		if existing == nil {
 			// 创建新角色（基本信息，详细外貌信息需要后续补充）
 			character := &novel.Character{
-				ID:      id.New(),
-				NovelID: novelID,
-				Name:    characterName,
+				ID:          id.New(),
+				NovelID:     novelID,
+				WorkflowID:  novelEntity.WorkflowID,
+				Name:        characterName,
 				// 注意：从 Shot 表中只能获取角色名称，其他信息（性别、年龄等）需要后续补充
 			}
 

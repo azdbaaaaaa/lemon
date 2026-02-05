@@ -15,6 +15,7 @@ type Audio struct {
 	ID              string     `bson:"id" json:"id"`                               // 音频ID（UUID）
 	NarrationID     string     `bson:"narration_id" json:"narration_id"`           // 关联的解说ID
 	ChapterID       string     `bson:"chapter_id" json:"chapter_id"`               // 关联的章节ID
+	WorkflowID      string     `bson:"workflow_id" json:"workflow_id"`             // 关联的工作流ID
 	UserID          string     `bson:"user_id" json:"user_id"`                     // 用户ID
 	Sequence        int        `bson:"sequence" json:"sequence"`                   // 音频片段序号（从1开始）
 	AudioResourceID string     `bson:"audio_resource_id" json:"audio_resource_id"` // 音频文件的 resource_id
@@ -52,6 +53,10 @@ func (a *Audio) EnsureIndexes(ctx context.Context, db *mongo.Database) error {
 		{
 			Keys:    bson.D{{Key: "chapter_id", Value: 1}},
 			Options: options.Index().SetName("idx_chapter_id"),
+		},
+		{
+			Keys:    bson.D{{Key: "workflow_id", Value: 1}},
+			Options: options.Index().SetName("idx_workflow_id"),
 		},
 		{
 			Keys:    bson.D{{Key: "user_id", Value: 1}, {Key: "created_at", Value: -1}},

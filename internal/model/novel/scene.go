@@ -14,7 +14,9 @@ import (
 // 不再需要 narration_id，直接通过 chapter_id + version 关联
 type Scene struct {
 	ID          string     `bson:"id" json:"id"`                                   // 场景ID（UUID）
+	NarrationID string     `bson:"narration_id" json:"narration_id"`               // 关联的解说ID（批次标识）
 	ChapterID   string     `bson:"chapter_id" json:"chapter_id"`                   // 关联的章节ID
+	WorkflowID  string     `bson:"workflow_id" json:"workflow_id"`                 // 关联的工作流ID
 	UserID      string     `bson:"user_id" json:"user_id"`                         // 用户ID（冗余字段，方便查询）
 	SceneNumber string     `bson:"scene_number" json:"scene_number"`               // 场景编号（字符串，如 "1"）
 	Narration   string     `bson:"narration,omitempty" json:"narration,omitempty"` // 场景级别的解说内容（可选）
@@ -38,6 +40,10 @@ func (s *Scene) EnsureIndexes(ctx context.Context, db *mongo.Database) error {
 		{
 			Keys:    bson.D{{Key: "chapter_id", Value: 1}},
 			Options: options.Index().SetName("idx_chapter_id"),
+		},
+		{
+			Keys:    bson.D{{Key: "workflow_id", Value: 1}},
+			Options: options.Index().SetName("idx_workflow_id"),
 		},
 		{
 			Keys:    bson.D{{Key: "chapter_id", Value: 1}, {Key: "version", Value: 1}, {Key: "scene_number", Value: 1}},

@@ -1,4 +1,4 @@
-.PHONY: all build run dev test lint lint-fix fmt clean deps tools docker-build docker-run docker-stop wire coverage help
+.PHONY: all build run dev test lint lint-fix fmt clean deps tools docker-build docker-run docker-stop wire coverage help init-admin
 
 # 变量
 APP_NAME := lemon
@@ -185,3 +185,7 @@ help:
 	@echo "  clean         Clean build artifacts"
 	@echo "  git-init      Initialize git repository"
 	@echo "  help          Show this help"
+
+## 初始化管理员账号（默认 admin / admin123）
+init-admin:
+	INIT_ADMIN_USERNAME=admin INIT_ADMIN_PASSWORD=admin123 go run ./scripts/init_admin.go

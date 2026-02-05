@@ -16,6 +16,7 @@ type Image struct {
 
 	ChapterID   string `bson:"chapter_id" json:"chapter_id"`     // 关联的章节ID
 	NarrationID string `bson:"narration_id" json:"narration_id"` // 关联的解说ID
+	WorkflowID  string `bson:"workflow_id" json:"workflow_id"`   // 关联的工作流ID
 
 	SceneNumber string `bson:"scene_number" json:"scene_number"` // 场景编号（字符串，如 "1"）
 	ShotNumber  string `bson:"shot_number" json:"shot_number"`   // 镜头编号（字符串，如 "1"）
@@ -44,6 +45,10 @@ func (i *Image) EnsureIndexes(ctx context.Context, db *mongo.Database) error {
 		{
 			Keys:    bson.D{{Key: "chapter_id", Value: 1}},
 			Options: options.Index().SetName("idx_chapter_id"),
+		},
+		{
+			Keys:    bson.D{{Key: "workflow_id", Value: 1}},
+			Options: options.Index().SetName("idx_workflow_id"),
 		},
 		{
 			Keys:    bson.D{{Key: "narration_id", Value: 1}},

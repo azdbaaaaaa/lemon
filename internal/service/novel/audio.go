@@ -22,6 +22,9 @@ type AudioService interface {
 
 	// GetAudioVersions 获取章节解说的所有音频版本号
 	GetAudioVersions(ctx context.Context, narrationID string) ([]int, error)
+
+	// ListAudiosByNarration 获取解说的音频列表（可指定版本；version<=0 则取最新版本）
+	ListAudiosByNarration(ctx context.Context, narrationID string, version int) ([]*novel.Audio, int, error)
 }
 
 // GenerateAudiosForNarration 为章节解说生成所有章节音频片段
@@ -165,12 +168,19 @@ func (s *novelService) generateSingleAudio(
 		}
 	}
 
+	// 获取章节信息以获取 workflow_id
+	chapter, err := s.chapterRepo.FindByID(ctx, narration.ChapterID)
+	if err != nil {
+		return "", fmt.Errorf("find chapter: %w", err)
+	}
+
 	// 8. 创建 chapter_audio 记录
 	audioID := id.New()
 	audioEntity := &novel.Audio{
 		ID:              audioID,
 		NarrationID:     narration.ID,
 		ChapterID:       narration.ChapterID,
+		WorkflowID:      chapter.WorkflowID,
 		UserID:          narration.UserID,
 		Sequence:        sequence,
 		AudioResourceID: resourceID,

@@ -16,6 +16,7 @@ type NarrationRepository interface {
 	Create(ctx context.Context, n *novel.Narration) error
 	FindByID(ctx context.Context, id string) (*novel.Narration, error)
 	FindByChapterID(ctx context.Context, chapterID string) (*novel.Narration, error)
+	FindAllByChapterID(ctx context.Context, chapterID string) ([]*novel.Narration, error)
 	FindByChapterIDAndVersion(ctx context.Context, chapterID string, version int) (*novel.Narration, error)
 	FindVersionsByChapterID(ctx context.Context, chapterID string) ([]int, error)
 	UpdateStatus(ctx context.Context, id string, status novel.TaskStatus) error
@@ -67,6 +68,23 @@ func (r *NarrationRepo) FindByChapterID(ctx context.Context, chapterID string) (
 		return nil, err
 	}
 	return &n, nil
+}
+
+// FindAllByChapterID 根据章节ID查询所有解说（按 version desc, created_at desc 排序）
+func (r *NarrationRepo) FindAllByChapterID(ctx context.Context, chapterID string) ([]*novel.Narration, error) {
+	filter := bson.M{"chapter_id": chapterID, "deleted_at": nil}
+	opts := options.Find().SetSort(bson.M{"version": -1, "created_at": -1})
+	cur, err := r.coll.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+
+	var narrations []*novel.Narration
+	if err := cur.All(ctx, &narrations); err != nil {
+		return nil, err
+	}
+	return narrations, nil
 }
 
 // FindByChapterIDAndVersion 根据章节ID和版本号查询解说

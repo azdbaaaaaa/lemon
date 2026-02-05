@@ -14,6 +14,8 @@ type GenerateNarrationRequest struct {
 // GenerateNarrationResponseData 生成解说响应数据
 type GenerateNarrationResponseData struct {
 	NarrationText string `json:"narration_text"` // 生成的解说文本（JSON格式）
+	NarrationID   string `json:"narration_id"`   // 解说ID（用于后续生成音频/字幕/图片/视频）
+	Version       int    `json:"version"`        // 解说版本号
 	ChapterID     string `json:"chapter_id"`      // 章节ID
 }
 
@@ -42,7 +44,7 @@ func (h *Handler) GenerateNarration(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	// 调用Service层
-	narrationText, err := h.novelService.GenerateNarrationForChapter(ctx, req.ChapterID)
+	narrationEntity, narrationText, err := h.novelService.GenerateNarrationForChapterWithMeta(ctx, req.ChapterID)
 	if err != nil {
 		code := http.StatusInternalServerError
 		errorCode := 50001
@@ -69,6 +71,8 @@ func (h *Handler) GenerateNarration(c *gin.Context) {
 		"message": "解说生成成功",
 		"data": GenerateNarrationResponseData{
 			NarrationText: narrationText,
+			NarrationID:   narrationEntity.ID,
+			Version:       narrationEntity.Version,
 			ChapterID:     req.ChapterID,
 		},
 	})

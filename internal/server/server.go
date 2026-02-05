@@ -16,10 +16,13 @@ import (
 	authHandler "lemon/internal/handler/auth"
 	novelHandler "lemon/internal/handler/novel"
 	resourceHandler "lemon/internal/handler/resource"
+	workflowHandler "lemon/internal/handler/workflow"
 	"lemon/internal/pkg/cache"
+	"lemon/internal/pkg/jwt"
 	"lemon/internal/pkg/mongodb"
 	"lemon/internal/pkg/storagefactory"
 	authRepo "lemon/internal/repository/auth"
+	wfRepo "lemon/internal/repository/workflow"
 	"lemon/internal/server/middleware"
 	"lemon/internal/service"
 	novelService "lemon/internal/service/novel"
@@ -205,18 +208,48 @@ func (s *Server) setupRoutes() {
 			log.Warn().Msg("MongoDB not configured, resource endpoints disabled")
 		}
 
-		// Novel 接口（小说相关）
+		// Novel / Workflow 接口（小说与工作流相关）
 		if s.mongo != nil {
 			// 初始化 ResourceService（需要 storage）
 			storage, err := storagefactory.NewStorage(context.Background(), &s.cfg.Storage)
 			if err != nil {
-				log.Warn().Err(err).Msg("failed to initialize storage, novel endpoints disabled")
+				log.Warn().Err(err).Msg("failed to initialize storage, novel/workflow endpoints disabled")
 			} else {
-				resourceSvc := service.NewResourceService(s.mongo.Database(), storage)
-				novelSvc, err := novelService.NewNovelService(s.mongo.Database(), resourceSvc)
+				db := s.mongo.Database()
+				resourceSvc := service.NewResourceService(db, storage)
+
+				// 初始化 JWT 工具（用于认证中间件）
+				jwtSecret := s.cfg.Auth.JWTSecret
+				if jwtSecret == "" {
+					jwtSecret = "default-secret-key-change-in-production"
+					log.Warn().Msg("JWT secret not configured, using default (NOT SECURE for production)")
+				}
+				accessTokenExpiry := s.cfg.Auth.AccessTokenExpiry
+				if accessTokenExpiry == 0 {
+					accessTokenExpiry = 24 * time.Hour
+				}
+				jwtUtil := jwt.NewJWT(jwtSecret, accessTokenExpiry)
+
+				// 需要认证的路由组
+				authGroup := v1.Group("")
+				authGroup.Use(middleware.Auth(jwtUtil))
+
+				// 初始化 NovelService（WorkflowService 依赖它）
+				novelSvc, err := novelService.NewNovelService(db, resourceSvc)
 				if err != nil {
-					log.Warn().Err(err).Msg("failed to initialize NovelService, novel endpoints disabled")
+					log.Warn().Err(err).Msg("failed to initialize NovelService, novel/workflow endpoints disabled")
 				} else {
+					// 初始化 WorkflowService
+					wfRepository := wfRepo.NewRepo(db)
+					wfSvc := service.NewWorkflowService(wfRepository, resourceSvc, novelSvc)
+					wfHdl := workflowHandler.NewHandler(wfSvc)
+
+					// 工作流管理接口（需要认证）
+					authGroup.POST("/workflow", wfHdl.CreateWorkflow)
+					authGroup.GET("/workflow", wfHdl.ListWorkflows)
+					authGroup.GET("/workflow/:id", wfHdl.GetWorkflow)
+					authGroup.POST("/workflow/:id/start", wfHdl.StartWorkflow)
+
 					novelHdl := novelHandler.NewHandler(novelSvc)
 
 					// 小说管理接口
@@ -229,22 +262,31 @@ func (s *Server) setupRoutes() {
 
 					// 解说管理接口
 					v1.POST("/novels/chapters/:chapter_id/narration", novelHdl.GenerateNarration)
+					v1.POST("/novels/chapters/:chapter_id/narration/manual", novelHdl.CreateNarrationVersionManual)
 					v1.POST("/novels/:novel_id/chapters/narration", novelHdl.GenerateNarrationsForAllChapters)
 					v1.GET("/novels/chapters/:chapter_id/narration", novelHdl.GetNarration)
 					v1.GET("/novels/chapters/:chapter_id/narration/version/:version", novelHdl.GetNarrationByVersion)
 					v1.GET("/novels/chapters/:chapter_id/narration/versions", novelHdl.GetNarrationVersions)
+					v1.GET("/novels/chapters/:chapter_id/narrations", novelHdl.ListNarrationsByChapterID)
 					v1.PUT("/narrations/:narration_id/version", novelHdl.SetNarrationVersion)
+
+					// 解说内容（场景/镜头）查询接口（用于人工编辑/比对）
+					v1.GET("/narrations/:narration_id/scenes", novelHdl.GetScenesByNarration)
+					v1.GET("/narrations/:narration_id/shots", novelHdl.GetShotsByNarration)
 
 					// 音频生成接口
 					v1.POST("/narrations/:narration_id/audios", novelHdl.GenerateAudios)
+					v1.GET("/narrations/:narration_id/audios", novelHdl.ListAudiosByNarration)
 					v1.GET("/narrations/:narration_id/audios/versions", novelHdl.GetAudioVersions)
 
 					// 字幕生成接口
 					v1.POST("/narrations/:narration_id/subtitles", novelHdl.GenerateSubtitles)
+					v1.GET("/narrations/:narration_id/subtitles", novelHdl.ListSubtitlesByNarration)
 					v1.GET("/novels/chapters/:chapter_id/subtitles/versions", novelHdl.GetSubtitleVersions)
 
 					// 图片生成接口
 					v1.POST("/narrations/:narration_id/images", novelHdl.GenerateImages)
+					v1.GET("/narrations/:narration_id/images", novelHdl.ListImagesByNarration)
 					v1.GET("/novels/chapters/:chapter_id/images/versions", novelHdl.GetImageVersions)
 
 					// 角色管理接口
@@ -257,6 +299,7 @@ func (s *Server) setupRoutes() {
 					v1.POST("/novels/chapters/:chapter_id/videos/final", novelHdl.GenerateFinalVideo)
 
 					// 视频查询接口
+					v1.GET("/novels/chapters/:chapter_id/videos", novelHdl.ListVideosByChapter)
 					v1.GET("/novels/chapters/:chapter_id/videos/versions", novelHdl.GetVideoVersions)
 					v1.GET("/videos", novelHdl.GetVideosByStatus)
 				}

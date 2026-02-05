@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"lemon/internal/model/novel"
+	"lemon/internal/pkg/id"
 	"lemon/internal/pkg/noveltools"
 )
 
@@ -15,6 +16,9 @@ import (
 type NarrationService interface {
 	// GenerateNarrationForChapter 为单一章节生成解说文本
 	GenerateNarrationForChapter(ctx context.Context, chapterID string) (string, error)
+
+	// GenerateNarrationForChapterWithMeta 为单一章节生成解说文本，并返回本次生成的 Narration 元数据
+	GenerateNarrationForChapterWithMeta(ctx context.Context, chapterID string) (*novel.Narration, string, error)
 
 	// GenerateNarrationsForAllChapters 并发地为所有章节生成解说文本
 	GenerateNarrationsForAllChapters(ctx context.Context, novelID string) error
@@ -30,81 +34,133 @@ type NarrationService interface {
 
 	// GetNarrationVersions 获取章节的所有版本号
 	GetNarrationVersions(ctx context.Context, chapterID string) ([]int, error)
+
+	// ListNarrationsByChapterID 列出章节的所有解说版本（包含 narration_id/version/prompt/status）
+	ListNarrationsByChapterID(ctx context.Context, chapterID string) ([]*novel.Narration, error)
+
+	// CreateNarrationVersionFromText 人工提交解说 JSON，生成新的解说版本（会写入 narrations/scenes/shots）
+	CreateNarrationVersionFromText(ctx context.Context, chapterID, userID, prompt, narrationText string) (*novel.Narration, error)
+
+	// GetScenesByNarrationID 获取解说对应的场景列表（用于人工编辑/比对）
+	GetScenesByNarrationID(ctx context.Context, narrationID string) ([]*novel.Scene, error)
+
+	// GetShotsByNarrationID 获取解说对应的镜头列表（用于人工编辑/比对）
+	GetShotsByNarrationID(ctx context.Context, narrationID string) ([]*novel.Shot, error)
+}
+
+// GenerateNarrationForChapterWithMeta 为单一章节生成章节解说，并保存到 narrations/scenes/shots 表
+func (s *novelService) GenerateNarrationForChapterWithMeta(ctx context.Context, chapterID string) (*novel.Narration, string, error) {
+	return s.generateNarrationForChapter(ctx, chapterID)
 }
 
 // GenerateNarrationForChapter 为单一章节生成章节解说，并保存到 chapter_narrations 表
 // 返回的是 JSON 格式的字符串，实际存储的是结构化数据
 func (s *novelService) GenerateNarrationForChapter(ctx context.Context, chapterID string) (string, error) {
-	ch, err := s.chapterRepo.FindByID(ctx, chapterID)
+	n, txt, err := s.generateNarrationForChapter(ctx, chapterID)
 	if err != nil {
 		return "", err
+	}
+	_ = n
+	return txt, nil
+}
+
+func (s *novelService) generateNarrationForChapter(ctx context.Context, chapterID string) (*novel.Narration, string, error) {
+	ch, err := s.chapterRepo.FindByID(ctx, chapterID)
+	if err != nil {
+		return nil, "", err
 	}
 
 	totalChapters, err := s.getTotalChapters(ctx, ch.NovelID)
 	if err != nil {
-		return "", err
+		return nil, "", err
 	}
 
-	generator := noveltools.NewNarrationGenerator(s.llmProvider)
-	// 传递章节字数，用于根据章节长度调整 prompt 要求
-	_, narrationText, err := generator.GenerateWithPrompt(ctx, ch.ChapterText, ch.Sequence, totalChapters, ch.WordCount)
+	prompt, filteredNarration, jsonContent, err := s.buildNarrationJSON(ctx, ch, totalChapters)
 	if err != nil {
-		return "", err
+		return nil, "", err
+	}
+
+	nextVersion, err := s.getNextNarrationVersion(ctx, ch.ID)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get next version: %w", err)
+	}
+
+	narrationEntity, err := s.persistNarrationBatch(ctx, ch, nextVersion, prompt, jsonContent)
+	if err != nil {
+		return nil, "", err
+	}
+
+	return narrationEntity, filteredNarration, nil
+}
+
+func (s *novelService) buildNarrationJSON(
+	ctx context.Context,
+	ch *novel.Chapter,
+	totalChapters int,
+) (prompt string, filteredNarration string, jsonContent *noveltools.NarrationJSONContent, err error) {
+	generator := noveltools.NewNarrationGenerator(s.llmProvider)
+	prompt, narrationText, err := generator.GenerateWithPrompt(ctx, ch.ChapterText, ch.Sequence, totalChapters, ch.WordCount)
+	if err != nil {
+		return "", "", nil, err
 	}
 
 	narrationText = strings.TrimSpace(narrationText)
 	if narrationText == "" {
-		return "", fmt.Errorf("generated narrationText is empty")
+		return "", "", nil, fmt.Errorf("generated narrationText is empty")
 	}
 
-	// 步骤1: 内容审查和过滤（参考 Python 的 audit_and_filter_narration）
-	// 极度宽松模式：仅提示，不阻断
-	filteredNarration, err := s.auditAndFilterNarration(ctx, narrationText, ch.Sequence)
+	filteredNarration, err = s.auditAndFilterNarration(ctx, narrationText, ch.Sequence)
 	if err != nil {
-		// 即使审查出错，也继续使用原始内容（极度宽松模式）
 		filteredNarration = narrationText
 	}
 
-	// 步骤2: 解析 JSON 格式并验证
-	jsonContent, err := noveltools.ParseNarrationJSON(filteredNarration)
+	jsonContent, err = noveltools.ParseNarrationJSON(filteredNarration)
 	if err != nil {
-		return "", fmt.Errorf("narration parsing failed: %w", err)
+		return "", "", nil, fmt.Errorf("narration parsing failed: %w", err)
 	}
-
-	// 基本验证：至少要有场景
 	if len(jsonContent.Scenes) == 0 {
-		return "", fmt.Errorf("narration validation failed: 缺少 scenes 字段或 scenes 为空")
+		return "", "", nil, fmt.Errorf("narration validation failed: 缺少 scenes 字段或 scenes 为空")
 	}
 
-	// 生成下一个版本号（自动递增）
-	nextVersion, err := s.getNextNarrationVersion(ctx, ch.ID)
+	return prompt, filteredNarration, jsonContent, nil
+}
+
+func (s *novelService) persistNarrationBatch(
+	ctx context.Context,
+	ch *novel.Chapter,
+	version int,
+	prompt string,
+	jsonContent *noveltools.NarrationJSONContent,
+) (*novel.Narration, error) {
+	narrationID := id.New()
+	narrationEntity := &novel.Narration{
+		ID:         narrationID,
+		ChapterID:  ch.ID,
+		WorkflowID: ch.WorkflowID,
+		UserID:     ch.UserID,
+		Prompt:     prompt,
+		Version:    version,
+		Status:     novel.TaskStatusCompleted,
+	}
+	if err := s.narrationRepo.Create(ctx, narrationEntity); err != nil {
+		return nil, fmt.Errorf("failed to create narration record: %w", err)
+	}
+
+	scenes, shots, err := noveltools.ConvertToScenesAndShots(narrationID, ch.ID, ch.WorkflowID, ch.UserID, version, jsonContent)
 	if err != nil {
-		return "", fmt.Errorf("failed to get next version: %w", err)
+		return nil, fmt.Errorf("failed to convert scenes and shots: %w", err)
 	}
-
-	// 步骤3: 将场景和镜头转换为实体并保存到独立的表中
-	// 注意：不再使用 narrationID，改用 chapterID + version 作为批次标识
-	scenes, shots, err := noveltools.ConvertToScenesAndShots(ch.ID, ch.UserID, nextVersion, jsonContent)
-	if err != nil {
-		return "", fmt.Errorf("failed to convert scenes and shots: %w", err)
-	}
-
-	// 批量保存场景
 	if len(scenes) > 0 {
 		if err := s.sceneRepo.CreateMany(ctx, scenes); err != nil {
-			return "", fmt.Errorf("failed to save scenes: %w", err)
+			return nil, fmt.Errorf("failed to save scenes: %w", err)
 		}
 	}
-
-	// 批量保存镜头
 	if len(shots) > 0 {
 		if err := s.shotRepo.CreateMany(ctx, shots); err != nil {
-			return "", fmt.Errorf("failed to save shots: %w", err)
+			return nil, fmt.Errorf("failed to save shots: %w", err)
 		}
 	}
-
-	// 返回 JSON 字符串（LLM 生成的原始 JSON 内容）
-	return filteredNarration, nil
+	return narrationEntity, nil
 }
 
 // GenerateNarrationsForAllChapters 第三步：并发地根据每一章节内容生成章节对应的章节解说
@@ -126,9 +182,9 @@ func (s *novelService) GenerateNarrationsForAllChapters(ctx context.Context, nov
 		go func(chapter *novel.Chapter) {
 			defer wg.Done()
 
-		generator := noveltools.NewNarrationGenerator(s.llmProvider)
-		// 传递章节字数，用于根据章节长度调整 prompt 要求
-		_, narrationText, err := generator.GenerateWithPrompt(ctx, chapter.ChapterText, chapter.Sequence, totalChapters, chapter.WordCount)
+			generator := noveltools.NewNarrationGenerator(s.llmProvider)
+			// 传递章节字数，用于根据章节长度调整 prompt 要求
+			prompt, narrationText, err := generator.GenerateWithPrompt(ctx, chapter.ChapterText, chapter.Sequence, totalChapters, chapter.WordCount)
 			if err != nil {
 				errCh <- fmt.Errorf("failed to generate narration for chapter %d: %w", chapter.Sequence, err)
 				return
@@ -168,9 +224,24 @@ func (s *novelService) GenerateNarrationsForAllChapters(ctx context.Context, nov
 				return
 			}
 
+			// 创建 Narration 记录（作为本次解说生成的批次标识）
+			narrationID := id.New()
+			narrationEntity := &novel.Narration{
+				ID:         narrationID,
+				ChapterID:  chapter.ID,
+				WorkflowID: chapter.WorkflowID,
+				UserID:     chapter.UserID,
+				Prompt:     prompt,
+				Version:    nextVersion,
+				Status:     novel.TaskStatusCompleted,
+			}
+			if err := s.narrationRepo.Create(ctx, narrationEntity); err != nil {
+				errCh <- fmt.Errorf("failed to create narration record for chapter %d: %w", chapter.Sequence, err)
+				return
+			}
+
 			// 步骤3: 将场景和镜头转换为实体并保存到独立的表中
-			// 注意：不再使用 narrationID，改用 chapterID + version 作为批次标识
-			scenes, shots, err := noveltools.ConvertToScenesAndShots(chapter.ID, chapter.UserID, nextVersion, jsonContent)
+			scenes, shots, err := noveltools.ConvertToScenesAndShots(narrationID, chapter.ID, chapter.WorkflowID, chapter.UserID, nextVersion, jsonContent)
 			if err != nil {
 				errCh <- fmt.Errorf("failed to convert scenes and shots for chapter %d: %w", chapter.Sequence, err)
 				return
@@ -227,35 +298,58 @@ func (s *novelService) SetNarrationVersion(ctx context.Context, narrationID stri
 // GetNarrationVersions 获取章节的所有版本号
 // 注意：现在从 Scene 表中获取版本号，因为不再使用 Narration 表
 func (s *novelService) GetNarrationVersions(ctx context.Context, chapterID string) ([]int, error) {
-	scenes, err := s.sceneRepo.FindByChapterID(ctx, chapterID)
+	return s.narrationRepo.FindVersionsByChapterID(ctx, chapterID)
+}
+
+func (s *novelService) ListNarrationsByChapterID(ctx context.Context, chapterID string) ([]*novel.Narration, error) {
+	return s.narrationRepo.FindAllByChapterID(ctx, chapterID)
+}
+
+func (s *novelService) CreateNarrationVersionFromText(
+	ctx context.Context,
+	chapterID, userID, prompt, narrationText string,
+) (*novel.Narration, error) {
+	ch, err := s.chapterRepo.FindByID(ctx, chapterID)
 	if err != nil {
 		return nil, err
 	}
 
-	// 收集所有唯一的版本号
-	versionSet := make(map[int]bool)
-	for _, scene := range scenes {
-		if scene.Version > 0 {
-			versionSet[scene.Version] = true
-		}
+	narrationText = strings.TrimSpace(narrationText)
+	if narrationText == "" {
+		return nil, fmt.Errorf("narrationText is empty")
 	}
 
-	// 转换为切片并排序
-	versions := make([]int, 0, len(versionSet))
-	for v := range versionSet {
-		versions = append(versions, v)
+	jsonContent, err := noveltools.ParseNarrationJSON(narrationText)
+	if err != nil {
+		return nil, fmt.Errorf("narration parsing failed: %w", err)
+	}
+	if len(jsonContent.Scenes) == 0 {
+		return nil, fmt.Errorf("narration validation failed: 缺少 scenes 字段或 scenes 为空")
 	}
 
-	// 简单排序（冒泡排序）
-	for i := 0; i < len(versions)-1; i++ {
-		for j := i + 1; j < len(versions); j++ {
-			if versions[i] > versions[j] {
-				versions[i], versions[j] = versions[j], versions[i]
-			}
-		}
+	nextVersion, err := s.getNextNarrationVersion(ctx, chapterID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get next version: %w", err)
 	}
 
-	return versions, nil
+	// userID 以请求为准（运营可能代操作），但 chapter.UserID 用于后续资源归属
+	if userID != "" {
+		ch.UserID = userID
+	}
+
+	narrationEntity, err := s.persistNarrationBatch(ctx, ch, nextVersion, prompt, jsonContent)
+	if err != nil {
+		return nil, err
+	}
+	return narrationEntity, nil
+}
+
+func (s *novelService) GetScenesByNarrationID(ctx context.Context, narrationID string) ([]*novel.Scene, error) {
+	return s.sceneRepo.FindByNarrationID(ctx, narrationID)
+}
+
+func (s *novelService) GetShotsByNarrationID(ctx context.Context, narrationID string) ([]*novel.Shot, error) {
+	return s.shotRepo.FindByNarrationID(ctx, narrationID)
 }
 
 // GetAudioVersions 获取章节解说的所有音频版本号
@@ -290,38 +384,19 @@ func (s *novelService) getTotalChapters(ctx context.Context, novelID string) (in
 // 例如：如果已有 1, 2，则返回 3
 // 注意：现在从 Scene 表中获取版本号，因为不再使用 Narration 表
 func (s *novelService) getNextNarrationVersion(ctx context.Context, chapterID string) (int, error) {
-	// 从 Scene 表中获取所有版本号
-	scenes, err := s.sceneRepo.FindByChapterID(ctx, chapterID)
-	if err != nil {
-		// 如果没有找到任何场景，返回 1
+	versions, err := s.narrationRepo.FindVersionsByChapterID(ctx, chapterID)
+	if err != nil || len(versions) == 0 {
 		return 1, nil
 	}
-
-	if len(scenes) == 0 {
-		return 1, nil
-	}
-
-	// 收集所有唯一的版本号
-	versionSet := make(map[int]bool)
-	for _, scene := range scenes {
-		if scene.Version > 0 {
-			versionSet[scene.Version] = true
-		}
-	}
-
-	if len(versionSet) == 0 {
-		return 1, nil
-	}
-
-	// 找到最大的版本号
 	maxVersion := 0
-	for v := range versionSet {
+	for _, v := range versions {
 		if v > maxVersion {
 			maxVersion = v
 		}
 	}
-
-	// 返回下一个版本号
+	if maxVersion == 0 {
+		return 1, nil
+	}
 	return maxVersion + 1, nil
 }
 

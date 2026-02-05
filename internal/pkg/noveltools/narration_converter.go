@@ -8,9 +8,11 @@ import (
 
 // ConvertToScenesAndShots 将解析后的 JSON 内容转换为 Scene 和 Shot 实体
 // 这是一个纯函数，不依赖任何 service 层状态，适合放在 pkg 包中
-// 注意：不再使用 narrationID，改用 chapterID + version 作为批次标识
+// narrationID 用作一次解说生成的批次标识；同一章节可有多个版本，每个版本对应一个 narrationID
 func ConvertToScenesAndShots(
+	narrationID string,
 	chapterID string,
+	workflowID string,
 	userID string,
 	version int,
 	jsonContent *NarrationJSONContent,
@@ -26,10 +28,12 @@ func ConvertToScenesAndShots(
 		}
 
 		// 创建 Scene 实体
-		sceneID := fmt.Sprintf("%s-scene-%s-v%d", chapterID, jsonScene.SceneNumber, version)
+		sceneID := fmt.Sprintf("%s-scene-%s-v%d", narrationID, jsonScene.SceneNumber, version)
 		scene := &novel.Scene{
 			ID:          sceneID,
+			NarrationID: narrationID,
 			ChapterID:   chapterID,
+			WorkflowID:  workflowID,
 			UserID:      userID,
 			SceneNumber: jsonScene.SceneNumber,
 			Narration:   jsonScene.Narration,
@@ -45,11 +49,14 @@ func ConvertToScenesAndShots(
 				continue
 			}
 
-			shotID := fmt.Sprintf("%s-shot-%s-%s-v%d", chapterID, jsonScene.SceneNumber, jsonShot.CloseupNumber, version)
+			shotID := fmt.Sprintf("%s-shot-%s-%s-v%d", narrationID, jsonScene.SceneNumber, jsonShot.CloseupNumber, version)
 			shot := &novel.Shot{
 				ID:          shotID,
 				SceneID:     sceneID,
+				SceneNumber: jsonScene.SceneNumber,
+				NarrationID: narrationID,
 				ChapterID:   chapterID,
+				WorkflowID:  workflowID,
 				UserID:      userID,
 				ShotNumber:  jsonShot.CloseupNumber,
 				Character:   jsonShot.Character,

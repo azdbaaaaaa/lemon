@@ -17,6 +17,7 @@ type SubtitleRepository interface {
 	FindByID(ctx context.Context, id string) (*novel.Subtitle, error)
 	FindByChapterID(ctx context.Context, chapterID string) (*novel.Subtitle, error)
 	FindByNarrationID(ctx context.Context, narrationID string) ([]*novel.Subtitle, error)
+	FindByNarrationIDAndVersion(ctx context.Context, narrationID string, version int) ([]*novel.Subtitle, error)
 	FindByNarrationIDAndSequence(ctx context.Context, narrationID string, sequence int) (*novel.Subtitle, error)
 	FindByChapterIDAndVersion(ctx context.Context, chapterID string, version int) (*novel.Subtitle, error)
 	FindVersionsByChapterID(ctx context.Context, chapterID string) ([]int, error)
@@ -91,6 +92,23 @@ func (r *SubtitleRepo) FindByNarrationID(ctx context.Context, narrationID string
 			continue
 		}
 		subtitles = append(subtitles, &s)
+	}
+	return subtitles, nil
+}
+
+// FindByNarrationIDAndVersion 根据解说ID和版本号查询所有字幕（按 sequence 排序）
+func (r *SubtitleRepo) FindByNarrationIDAndVersion(ctx context.Context, narrationID string, version int) ([]*novel.Subtitle, error) {
+	filter := bson.M{"narration_id": narrationID, "version": version, "deleted_at": nil}
+	opts := options.Find().SetSort(bson.M{"sequence": 1})
+	cur, err := r.coll.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+
+	var subtitles []*novel.Subtitle
+	if err := cur.All(ctx, &subtitles); err != nil {
+		return nil, err
 	}
 	return subtitles, nil
 }

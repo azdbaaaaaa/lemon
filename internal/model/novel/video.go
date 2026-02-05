@@ -15,6 +15,7 @@ type Video struct {
 	ID              string     `bson:"id" json:"id"`                                           // 视频ID（UUID）
 	ChapterID       string     `bson:"chapter_id" json:"chapter_id"`                           // 关联的章节ID
 	NarrationID     string     `bson:"narration_id,omitempty" json:"narration_id,omitempty"`   // 关联的解说ID（可选，final_video 没有 narration_id）
+	WorkflowID      string     `bson:"workflow_id" json:"workflow_id"`                         // 关联的工作流ID
 	UserID          string     `bson:"user_id" json:"user_id"`                                 // 用户ID
 	Sequence        int        `bson:"sequence" json:"sequence"`                               // 视频片段序号（从1开始）
 	VideoResourceID string     `bson:"video_resource_id" json:"video_resource_id"`             // 视频文件的 resource_id
@@ -41,6 +42,10 @@ func (v *Video) EnsureIndexes(ctx context.Context, db *mongo.Database) error {
 		{
 			Keys:    bson.D{{Key: "chapter_id", Value: 1}},
 			Options: options.Index().SetName("idx_chapter_id"),
+		},
+		{
+			Keys:    bson.D{{Key: "workflow_id", Value: 1}},
+			Options: options.Index().SetName("idx_workflow_id"),
 		},
 		{
 			Keys:    bson.D{{Key: "narration_id", Value: 1}},

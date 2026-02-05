@@ -2,6 +2,7 @@ package novel
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
@@ -41,8 +42,24 @@ func (h *Handler) GenerateFinalVideo(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
+	// 可选：指定要合并的 narration 视频版本号（用于人工确认后合并）
+	versionStr := c.Query("version")
+	version := 0
+	if versionStr != "" {
+		v, err := strconv.Atoi(versionStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, ErrorResponse{
+				Code:    40002,
+				Message: "Invalid version",
+				Detail:  err.Error(),
+			})
+			return
+		}
+		version = v
+	}
+
 	// 调用Service层
-	videoID, err := h.novelService.GenerateFinalVideoForChapter(ctx, req.ChapterID)
+	videoID, err := h.novelService.GenerateFinalVideoForChapterWithVersion(ctx, req.ChapterID, version)
 	if err != nil {
 		code := http.StatusInternalServerError
 		errorCode := 50001
