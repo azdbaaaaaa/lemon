@@ -22,6 +22,7 @@ type ShotRepository interface {
 	FindByChapterID(ctx context.Context, chapterID string) ([]*novel.Shot, error)
 	FindByChapterIDAndSceneAndShot(ctx context.Context, chapterID, sceneNumber, shotNumber string) (*novel.Shot, error)
 	Update(ctx context.Context, id string, updates map[string]interface{}) error
+	UpdateStatus(ctx context.Context, id string, status novel.TaskStatus, errorMessage string) error
 	Delete(ctx context.Context, id string) error
 	DeleteBySceneID(ctx context.Context, sceneID string) error
 	DeleteByNarrationID(ctx context.Context, narrationID string) error
@@ -174,6 +175,25 @@ func (r *ShotRepo) Update(ctx context.Context, id string, updates map[string]int
 		ctx,
 		bson.M{"id": id},
 		bson.M{"$set": updates},
+	)
+	return err
+}
+
+// UpdateStatus 更新镜头状态
+func (r *ShotRepo) UpdateStatus(ctx context.Context, id string, status novel.TaskStatus, errorMessage string) error {
+	update := bson.M{
+		"status":     status,
+		"updated_at": time.Now(),
+	}
+	if errorMessage != "" {
+		update["error_message"] = errorMessage
+	} else {
+		update["$unset"] = bson.M{"error_message": ""}
+	}
+	_, err := r.coll.UpdateOne(
+		ctx,
+		bson.M{"id": id},
+		bson.M{"$set": update},
 	)
 	return err
 }

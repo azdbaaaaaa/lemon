@@ -19,7 +19,7 @@ type NarrationRepository interface {
 	FindAllByChapterID(ctx context.Context, chapterID string) ([]*novel.Narration, error)
 	FindByChapterIDAndVersion(ctx context.Context, chapterID string, version int) (*novel.Narration, error)
 	FindVersionsByChapterID(ctx context.Context, chapterID string) ([]int, error)
-	UpdateStatus(ctx context.Context, id string, status novel.TaskStatus) error
+	UpdateStatus(ctx context.Context, id string, status novel.TaskStatus, errorMessage string) error
 	UpdateVersion(ctx context.Context, id string, version int) error
 	Delete(ctx context.Context, id string) error
 }
@@ -132,14 +132,20 @@ func (r *NarrationRepo) FindVersionsByChapterID(ctx context.Context, chapterID s
 }
 
 // UpdateStatus 更新解说状态
-func (r *NarrationRepo) UpdateStatus(ctx context.Context, id string, status novel.TaskStatus) error {
+func (r *NarrationRepo) UpdateStatus(ctx context.Context, id string, status novel.TaskStatus, errorMessage string) error {
+	update := bson.M{
+		"status":     status,
+		"updated_at": time.Now(),
+	}
+	if errorMessage != "" {
+		update["error_message"] = errorMessage
+	} else {
+		update["$unset"] = bson.M{"error_message": ""}
+	}
 	_, err := r.coll.UpdateOne(
 		ctx,
 		bson.M{"id": id},
-		bson.M{"$set": bson.M{
-			"status":     status,
-			"updated_at": time.Now(),
-		}},
+		bson.M{"$set": update},
 	)
 	return err
 }

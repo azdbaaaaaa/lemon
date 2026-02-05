@@ -18,12 +18,13 @@ type Narration struct {
 	ChapterID  string     `bson:"chapter_id" json:"chapter_id"`             // 关联的章节ID
 	WorkflowID string     `bson:"workflow_id" json:"workflow_id"`           // 关联的工作流ID
 	UserID     string     `bson:"user_id" json:"user_id"`                   // 用户ID
-	Prompt     string     `bson:"prompt,omitempty" json:"prompt,omitempty"` // 生成解说时使用的提示词
-	Version    int        `bson:"version" json:"version"`                   // 版本号（用于支持多版本，默认 1）
-	Status     TaskStatus `bson:"status" json:"status"`                     // 状态：pending, completed, failed
-	CreatedAt  time.Time  `bson:"created_at" json:"created_at"`
-	UpdatedAt  time.Time  `bson:"updated_at" json:"updated_at"`
-	DeletedAt  *time.Time `bson:"deleted_at,omitempty" json:"deleted_at,omitempty"`
+	Prompt       string     `bson:"prompt,omitempty" json:"prompt,omitempty"` // 生成解说时使用的提示词
+	Version      int        `bson:"version" json:"version"`                   // 版本号（用于支持多版本，默认 1）
+	Status       TaskStatus `bson:"status" json:"status"`                     // 状态：pending, completed, failed
+	ErrorMessage string     `bson:"error_message,omitempty" json:"error_message,omitempty"` // 错误信息（失败时）
+	CreatedAt    time.Time  `bson:"created_at" json:"created_at"`
+	UpdatedAt    time.Time  `bson:"updated_at" json:"updated_at"`
+	DeletedAt    *time.Time `bson:"deleted_at,omitempty" json:"deleted_at,omitempty"`
 }
 
 // Collection 返回集合名称

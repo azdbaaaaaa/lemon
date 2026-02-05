@@ -30,6 +30,7 @@ func EnsureIndexes(db *mongo.Database) error {
 		&novel.Audio{},
 		&novel.Subtitle{},
 		&novel.Character{},
+		&novel.Prop{},
 		&novel.Image{},
 		&novel.Video{},
 	}

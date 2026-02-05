@@ -18,6 +18,7 @@ type CharacterRepository interface {
 	FindByNovelID(ctx context.Context, novelID string) ([]*novel.Character, error)
 	FindByNameAndNovelID(ctx context.Context, name, novelID string) (*novel.Character, error)
 	Update(ctx context.Context, id string, updates bson.M) error
+	UpdateStatus(ctx context.Context, id string, status novel.TaskStatus, errorMessage string) error
 	Delete(ctx context.Context, id string) error
 }
 
@@ -84,6 +85,25 @@ func (r *CharacterRepo) Update(ctx context.Context, id string, updates bson.M) e
 		ctx,
 		bson.M{"id": id},
 		bson.M{"$set": updates},
+	)
+	return err
+}
+
+// UpdateStatus 更新角色状态
+func (r *CharacterRepo) UpdateStatus(ctx context.Context, id string, status novel.TaskStatus, errorMessage string) error {
+	update := bson.M{
+		"status":     status,
+		"updated_at": time.Now(),
+	}
+	if errorMessage != "" {
+		update["error_message"] = errorMessage
+	} else {
+		update["$unset"] = bson.M{"error_message": ""}
+	}
+	_, err := r.coll.UpdateOne(
+		ctx,
+		bson.M{"id": id},
+		bson.M{"$set": update},
 	)
 	return err
 }

@@ -44,17 +44,23 @@ type NarrationJSONContent struct {
 // NarrationJSONScene 临时场景结构体
 type NarrationJSONScene struct {
 	SceneNumber string              `json:"scene_number"`
-	Narration   string              `json:"narration,omitempty"`
+	Description string              `json:"description"`              // 场景详细描述
+	ImagePrompt string              `json:"image_prompt"`              // 场景图片提示词
+	Narration   string              `json:"narration,omitempty"`      // 场景级别的解说内容（可选）
 	Shots       []*NarrationJSONShot `json:"shots"`
 }
 
 // NarrationJSONShot 临时镜头结构体
 type NarrationJSONShot struct {
-	CloseupNumber string `json:"closeup_number"`
-	Character     string `json:"character"`
-	Narration     string `json:"narration"`
-	ScenePrompt   string `json:"scene_prompt"`
-	VideoPrompt   string `json:"video_prompt"`
+	CloseupNumber  string  `json:"closeup_number"`  // 镜头编号
+	Character      string  `json:"character"`       // 角色名称
+	Image          string  `json:"image"`           // 画面描述
+	Narration      string  `json:"narration"`       // 旁白
+	SoundEffect    string  `json:"sound_effect,omitempty"` // 音效描述
+	Duration       float64 `json:"duration,omitempty"`      // 时长（秒）
+	ImagePrompt    string  `json:"image_prompt"`    // 镜头图片提示词
+	VideoPrompt    string  `json:"video_prompt"`    // 镜头视频提示词
+	CameraMovement string  `json:"camera_movement,omitempty"` // 运镜方式
 }
 
 // ValidateNarrationJSON 验证 JSON 格式的解说文案

@@ -36,6 +36,7 @@ type novelService struct {
 	audioRepo       novelrepo.AudioRepository
 	subtitleRepo    novelrepo.SubtitleRepository
 	characterRepo   novelrepo.CharacterRepository
+	propRepo        novelrepo.PropRepository
 	imageRepo       novelrepo.ImageRepository
 	videoRepo       novelrepo.VideoRepository
 	llmProvider     noveltools.LLMProvider
@@ -59,6 +60,7 @@ func NewNovelService(
 	audioRepo := novelrepo.NewAudioRepo(db)
 	subtitleRepo := novelrepo.NewSubtitleRepo(db)
 	characterRepo := novelrepo.NewCharacterRepo(db)
+	propRepo := novelrepo.NewPropRepo(db)
 	imageRepo := novelrepo.NewImageRepo(db)
 	videoRepo := novelrepo.NewVideoRepo(db)
 
@@ -102,6 +104,7 @@ func NewNovelService(
 		audioRepo:       audioRepo,
 		subtitleRepo:    subtitleRepo,
 		characterRepo:   characterRepo,
+		propRepo:        propRepo,
 		imageRepo:       imageRepo,
 		videoRepo:       videoRepo,
 		llmProvider:     llmProvider,

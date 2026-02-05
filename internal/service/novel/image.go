@@ -152,7 +152,7 @@ func (s *novelService) generateSingleImage(
 	version int,
 ) (string, error) {
 	// 1. 构建完整 prompt
-	completePrompt := promptBuilder.BuildCompletePrompt(character, shot.ScenePrompt)
+	completePrompt := promptBuilder.BuildCompletePrompt(character, shot.ImagePrompt)
 
 	// 2. 构建输出文件名
 	outputFilename := fmt.Sprintf("chapter_%03d_image_%02d.jpeg", chapter.Sequence, sequence)

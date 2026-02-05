@@ -18,16 +18,22 @@ type ShotInfo struct {
 	ChapterID   string `json:"chapter_id"`
 	UserID      string `json:"user_id"`
 
-	ShotNumber  string `json:"shot_number"`
-	Character   string `json:"character,omitempty"`
-	Narration   string `json:"narration"`
-	ScenePrompt string `json:"scene_prompt,omitempty"`
-	VideoPrompt string `json:"video_prompt,omitempty"`
+	ShotNumber     string  `json:"shot_number"`
+	Character      string  `json:"character,omitempty"`
+	Image          string  `json:"image"`                     // 画面描述
+	Narration      string  `json:"narration"`                 // 旁白
+	SoundEffect    string  `json:"sound_effect,omitempty"`    // 音效描述
+	Duration       float64 `json:"duration,omitempty"`        // 时长（秒）
+	ImagePrompt    string  `json:"image_prompt"`              // 镜头图片提示词
+	VideoPrompt    string  `json:"video_prompt"`              // 镜头视频提示词
+	CameraMovement string  `json:"camera_movement,omitempty"` // 运镜方式
 
-	Sequence int `json:"sequence"`
-	Index    int `json:"index"`
-	Version  int `json:"version"`
+	Sequence int    `json:"sequence"`
+	Index    int    `json:"index"`
+	Version  int    `json:"version"`
 	Status   string `json:"status"`
+
+	ErrorMessage string `json:"error_message,omitempty"` // 错误信息（失败时）
 
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
@@ -35,23 +41,28 @@ type ShotInfo struct {
 
 func toShotInfo(s *novel.Shot) ShotInfo {
 	return ShotInfo{
-		ID:          s.ID,
-		SceneID:     s.SceneID,
-		SceneNumber: s.SceneNumber,
-		NarrationID: s.NarrationID,
-		ChapterID:   s.ChapterID,
-		UserID:      s.UserID,
-		ShotNumber:  s.ShotNumber,
-		Character:   s.Character,
-		Narration:   s.Narration,
-		ScenePrompt: s.ScenePrompt,
-		VideoPrompt: s.VideoPrompt,
-		Sequence:    s.Sequence,
-		Index:       s.Index,
-		Version:     s.Version,
-		Status:      string(s.Status),
-		CreatedAt:   s.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:   s.UpdatedAt.Format(time.RFC3339),
+		ID:             s.ID,
+		SceneID:        s.SceneID,
+		SceneNumber:    s.SceneNumber,
+		NarrationID:    s.NarrationID,
+		ChapterID:      s.ChapterID,
+		UserID:         s.UserID,
+		ShotNumber:     s.ShotNumber,
+		Character:      s.Character,
+		Image:          s.Image,
+		Narration:      s.Narration,
+		SoundEffect:    s.SoundEffect,
+		Duration:       s.Duration,
+		ImagePrompt:    s.ImagePrompt,
+		VideoPrompt:    s.VideoPrompt,
+		CameraMovement: s.CameraMovement,
+		Sequence:       s.Sequence,
+		Index:          s.Index,
+		Version:        s.Version,
+		Status:         string(s.Status),
+		ErrorMessage:   s.ErrorMessage,
+		CreatedAt:      s.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:      s.UpdatedAt.Format(time.RFC3339),
 	}
 }
 
@@ -101,5 +112,3 @@ func (h *Handler) GetShotsByNarration(c *gin.Context) {
 		},
 	})
 }
-
-

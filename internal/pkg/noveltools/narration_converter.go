@@ -36,6 +36,8 @@ func ConvertToScenesAndShots(
 			WorkflowID:  workflowID,
 			UserID:      userID,
 			SceneNumber: jsonScene.SceneNumber,
+			Description: jsonScene.Description,
+			ImagePrompt: jsonScene.ImagePrompt,
 			Narration:   jsonScene.Narration,
 			Sequence:    sceneSeq + 1, // 从1开始
 			Version:     version,
@@ -51,22 +53,26 @@ func ConvertToScenesAndShots(
 
 			shotID := fmt.Sprintf("%s-shot-%s-%s-v%d", narrationID, jsonScene.SceneNumber, jsonShot.CloseupNumber, version)
 			shot := &novel.Shot{
-				ID:          shotID,
-				SceneID:     sceneID,
-				SceneNumber: jsonScene.SceneNumber,
-				NarrationID: narrationID,
-				ChapterID:   chapterID,
-				WorkflowID:  workflowID,
-				UserID:      userID,
-				ShotNumber:  jsonShot.CloseupNumber,
-				Character:   jsonShot.Character,
-				Narration:   jsonShot.Narration,
-				ScenePrompt: jsonShot.ScenePrompt,
-				VideoPrompt: jsonShot.VideoPrompt,
-				Sequence:    shotSeq + 1,     // 在场景中的顺序，从1开始
-				Index:       globalShotIndex, // 全局索引
-				Version:     version,
-				Status:      novel.TaskStatusCompleted,
+				ID:             shotID,
+				SceneID:        sceneID,
+				SceneNumber:    jsonScene.SceneNumber,
+				NarrationID:    narrationID,
+				ChapterID:      chapterID,
+				WorkflowID:     workflowID,
+				UserID:         userID,
+				ShotNumber:     jsonShot.CloseupNumber,
+				Character:      jsonShot.Character,
+				Image:          jsonShot.Image,
+				Narration:      jsonShot.Narration,
+				SoundEffect:    jsonShot.SoundEffect,
+				Duration:       jsonShot.Duration,
+				ImagePrompt:    jsonShot.ImagePrompt,
+				VideoPrompt:    jsonShot.VideoPrompt,
+				CameraMovement: jsonShot.CameraMovement,
+				Sequence:       shotSeq + 1,     // 在场景中的顺序，从1开始
+				Index:          globalShotIndex, // 全局索引
+				Version:        version,
+				Status:         novel.TaskStatusCompleted,
 			}
 			shots = append(shots, shot)
 			globalShotIndex++

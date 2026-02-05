@@ -627,7 +627,7 @@ func (s *novelService) generateSingleNarrationVideo(
 		videoPrompt = enhanceVideoPrompt(
 			shotInfo.Shot.VideoPrompt,
 			image.Prompt,
-			shotInfo.Shot.ScenePrompt,
+			shotInfo.Shot.ImagePrompt,
 			shotInfo.Shot.Narration,
 		)
 		log.Info().
@@ -638,7 +638,7 @@ func (s *novelService) generateSingleNarrationVideo(
 			Msg("使用增强后的 video_prompt（基于 LLM 生成 + 解说内容 + 场景描述）")
 	} else {
 		// 如果没有 video_prompt，基于图片 prompt 和场景描述构建
-		videoPrompt = buildVideoPromptFromImage(image.Prompt, shotInfo.Shot.ScenePrompt, shotInfo.Shot.Narration)
+		videoPrompt = buildVideoPromptFromImage(image.Prompt, shotInfo.Shot.ImagePrompt, shotInfo.Shot.Narration)
 		if videoPrompt == "" {
 			videoPrompt = "画面有明显的动态效果，镜头缓慢推进，人物有自然的动作和表情变化，背景有轻微的运动感，整体画面流畅自然"
 		}

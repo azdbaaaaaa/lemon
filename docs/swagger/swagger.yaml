@@ -82,6 +82,33 @@ definitions:
         description: 错误消息
         type: string
     type: object
+  novel.ManualNarrationRequest:
+    properties:
+      narration_text:
+        description: 解说 JSON 文本（必填）
+        type: string
+      prompt:
+        description: 生成提示词（可选，便于记录）
+        type: string
+      user_id:
+        description: 用户ID（必填）
+        type: string
+    required:
+    - narration_text
+    - user_id
+    type: object
+  novel.SetNarrationVersionRequest:
+    properties:
+      narration_id:
+        description: 解说ID（必填）
+        type: string
+      version:
+        description: 版本号（必填）
+        type: integer
+    required:
+    - narration_id
+    - version
+    type: object
   novel.SplitChaptersRequest:
     properties:
       novel_id:
@@ -95,7 +122,55 @@ definitions:
     - novel_id
     - target_chapters
     type: object
+  novel.SyncCharactersRequest:
+    properties:
+      narration_id:
+        description: 解说ID（必填）
+        type: string
+      novel_id:
+        description: 小说ID（必填）
+        type: string
+    required:
+    - narration_id
+    - novel_id
+    type: object
   resource.ErrorResponse:
+    properties:
+      code:
+        description: 错误码（非0表示错误）
+        type: integer
+      detail:
+        description: 错误详情（可选）
+        type: string
+      message:
+        description: 错误消息
+        type: string
+    type: object
+  workflow.CreateWorkflowRequest:
+    properties:
+      input_type:
+        description: text 或 file
+        type: string
+      name:
+        type: string
+      narration_type:
+        description: 旁白类型：narration（旁白/解说）或 dialogue（真人对话）
+        type: string
+      resource_id:
+        type: string
+      resource_source:
+        type: string
+      text_content:
+        type: string
+      user_id:
+        description: UserID 保留给兼容用途，正常情况下应从认证中间件注入的 context 中获取
+        type: string
+    required:
+    - input_type
+    - name
+    - narration_type
+    type: object
+  workflow.ErrorResponse:
     properties:
       code:
         description: 错误码（非0表示错误）
@@ -275,6 +350,227 @@ paths:
       summary: 用户注册
       tags:
       - 认证
+  /api/v1/narrations/{narration_id}/audios:
+    get:
+      responses: {}
+    post:
+      consumes:
+      - application/json
+      description: 为章节解说生成所有章节音频片段，使用TTS服务生成音频。音频生成是异步的，提交任务后需要通过状态查询接口轮询进度。
+      parameters:
+      - description: 解说ID
+        in: path
+        name: narration_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '成功响应"  "{\"code\": 0, \"message\": \"音频生成任务已提交\", \"data\":
+            {\"audio_ids\": [\"...\"], \"count\": 1, \"narration_id\": \"...\"}}'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+        "500":
+          description: 服务器内部错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+      summary: 生成章节音频
+      tags:
+      - 音频生成
+  /api/v1/narrations/{narration_id}/audios/versions:
+    get:
+      consumes:
+      - application/json
+      description: 获取章节解说的所有音频版本号列表。
+      parameters:
+      - description: 解说ID
+        in: path
+        name: narration_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '成功响应"  "{\"code\": 0, \"message\": \"获取成功\", \"data\": {\"narration_id\":
+            \"...\", \"versions\": [1, 2, 3]}}'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+        "500":
+          description: 服务器内部错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+      summary: 获取音频版本列表
+      tags:
+      - 音频生成
+  /api/v1/narrations/{narration_id}/images:
+    get:
+      responses: {}
+    post:
+      consumes:
+      - application/json
+      description: 为章节解说生成所有章节图片，使用图片生成服务（Ark API）生成图片。图片生成是异步的，提交任务后需要通过状态查询接口轮询进度。
+      parameters:
+      - description: 解说ID
+        in: path
+        name: narration_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '成功响应"  "{\"code\": 0, \"message\": \"图片生成任务已提交\", \"data\":
+            {\"image_ids\": [\"...\"], \"count\": 1, \"narration_id\": \"...\"}}'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+        "500":
+          description: 服务器内部错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+      summary: 生成章节图片
+      tags:
+      - 图片生成
+  /api/v1/narrations/{narration_id}/scenes:
+    get:
+      consumes:
+      - application/json
+      description: 根据 narration_id 获取场景列表（按 sequence 排序）
+      parameters:
+      - description: 解说ID
+        in: path
+        name: narration_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+        "500":
+          description: 服务器内部错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+      summary: 获取解说场景列表
+      tags:
+      - 解说管理
+  /api/v1/narrations/{narration_id}/shots:
+    get:
+      consumes:
+      - application/json
+      description: 根据 narration_id 获取镜头列表（按 index 排序）
+      parameters:
+      - description: 解说ID
+        in: path
+        name: narration_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+        "500":
+          description: 服务器内部错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+      summary: 获取解说镜头列表
+      tags:
+      - 解说管理
+  /api/v1/narrations/{narration_id}/subtitles:
+    get:
+      responses: {}
+    post:
+      consumes:
+      - application/json
+      description: 为章节解说生成所有字幕文件（ASS格式），为每个 narration shot 生成单独的字幕文件，与音频片段一一对应。需要先有章节音频记录（包含时间戳数据）。
+      parameters:
+      - description: 解说ID
+        in: path
+        name: narration_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '成功响应"  "{\"code\": 0, \"message\": \"字幕生成任务已提交\", \"data\":
+            {\"subtitle_ids\": [\"...\"], \"count\": 1, \"narration_id\": \"...\"}}'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+        "500":
+          description: 服务器内部错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+      summary: 生成章节字幕
+      tags:
+      - 字幕生成
+  /api/v1/narrations/{narration_id}/version:
+    put:
+      consumes:
+      - application/json
+      description: 设置章节解说的版本号。
+      parameters:
+      - description: 设置版本请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/novel.SetNarrationVersionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '成功响应"  "{\"code\": 0, \"message\": \"版本号设置成功\"}'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+        "500":
+          description: 服务器内部错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+      summary: 设置解说版本号
+      tags:
+      - 解说管理
   /api/v1/novels:
     post:
       consumes:
@@ -373,6 +669,37 @@ paths:
       summary: 获取章节列表
       tags:
       - 章节管理
+  /api/v1/novels/{novel_id}/chapters/narration:
+    post:
+      consumes:
+      - application/json
+      description: 并发地为小说的所有章节生成解说文本。这是一个异步操作，会为每个章节生成解说并保存到数据库。
+      parameters:
+      - description: 小说ID
+        in: path
+        name: novel_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '成功响应"  "{\"code\": 0, \"message\": \"所有章节解说生成任务已提交\", \"data\":
+            {\"novel_id\": \"...\", \"message\": \"...\"}}'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+        "500":
+          description: 服务器内部错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+      summary: 为所有章节生成解说
+      tags:
+      - 解说管理
   /api/v1/novels/{novel_id}/chapters/split:
     post:
       consumes:
@@ -405,6 +732,371 @@ paths:
       summary: 切分章节
       tags:
       - 章节管理
+  /api/v1/novels/{novel_id}/characters:
+    get:
+      consumes:
+      - application/json
+      description: 获取小说的所有角色列表。
+      parameters:
+      - description: 小说ID
+        in: path
+        name: novel_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '成功响应"  "{\"code\": 0, \"message\": \"获取成功\", \"data\": [...]}'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+        "500":
+          description: 服务器内部错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+      summary: 获取小说角色列表
+      tags:
+      - 角色管理
+  /api/v1/novels/{novel_id}/characters/{name}:
+    get:
+      consumes:
+      - application/json
+      description: 根据名称获取角色信息。
+      parameters:
+      - description: 小说ID
+        in: path
+        name: novel_id
+        required: true
+        type: string
+      - description: 角色名称
+        in: query
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '成功响应"  "{\"code\": 0, \"message\": \"获取成功\", \"data\": {...}}'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+        "404":
+          description: 角色不存在
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+        "500":
+          description: 服务器内部错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+      summary: 获取角色信息
+      tags:
+      - 角色管理
+  /api/v1/novels/{novel_id}/characters/sync:
+    post:
+      consumes:
+      - application/json
+      description: 从章节解说同步角色信息到小说级别，提取解说中的角色信息并保存到角色表。
+      parameters:
+      - description: 同步角色请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/novel.SyncCharactersRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '成功响应"  "{\"code\": 0, \"message\": \"角色同步成功\", \"data\": {...}}'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+        "500":
+          description: 服务器内部错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+      summary: 同步角色信息
+      tags:
+      - 角色管理
+  /api/v1/novels/chapters/{chapter_id}/images/versions:
+    get:
+      consumes:
+      - application/json
+      description: 获取章节的所有图片版本号列表。
+      parameters:
+      - description: 章节ID
+        in: path
+        name: chapter_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '成功响应"  "{\"code\": 0, \"message\": \"获取成功\", \"data\": {\"chapter_id\":
+            \"...\", \"versions\": [1, 2, 3]}}'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+        "500":
+          description: 服务器内部错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+      summary: 获取图片版本列表
+      tags:
+      - 图片生成
+  /api/v1/novels/chapters/{chapter_id}/narration:
+    get:
+      consumes:
+      - application/json
+      description: 根据章节ID获取章节解说，返回最新版本的解说信息。
+      parameters:
+      - description: 章节ID
+        in: path
+        name: chapter_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '成功响应"  "{\"code\": 0, \"message\": \"获取成功\", \"data\": {...}}'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+        "404":
+          description: 解说不存在
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+        "500":
+          description: 服务器内部错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+      summary: 获取章节解说
+      tags:
+      - 解说管理
+    post:
+      consumes:
+      - application/json
+      description: 为单一章节生成解说文本，返回JSON格式的解说内容。解说内容会保存到数据库，包括场景和镜头信息。
+      parameters:
+      - description: 章节ID
+        in: path
+        name: chapter_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '成功响应"  "{\"code\": 0, \"message\": \"解说生成成功\", \"data\": {\"narration_text\":
+            \"...\", \"chapter_id\": \"...\"}}'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+        "500":
+          description: 服务器内部错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+      summary: 生成章节解说
+      tags:
+      - 解说管理
+  /api/v1/novels/chapters/{chapter_id}/narration/manual:
+    post:
+      consumes:
+      - application/json
+      description: 人工提交解说 JSON 文本，服务端解析/校验并生成新的解说版本（写入 narrations/scenes/shots）
+      parameters:
+      - description: 章节ID
+        in: path
+        name: chapter_id
+        required: true
+        type: string
+      - description: 请求体
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/novel.ManualNarrationRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+        "500":
+          description: 服务器内部错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+      summary: 人工提交解说并生成新版本
+      tags:
+      - 解说管理
+  /api/v1/novels/chapters/{chapter_id}/narration/version/{version}:
+    get:
+      consumes:
+      - application/json
+      description: 根据章节ID和版本号获取指定版本的章节解说信息。
+      parameters:
+      - description: 章节ID
+        in: path
+        name: chapter_id
+        required: true
+        type: string
+      - description: 版本号
+        in: query
+        name: version
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '成功响应"  "{\"code\": 0, \"message\": \"获取成功\", \"data\": {...}}'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+        "404":
+          description: 解说不存在
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+        "500":
+          description: 服务器内部错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+      summary: 获取指定版本的章节解说
+      tags:
+      - 解说管理
+  /api/v1/novels/chapters/{chapter_id}/narration/versions:
+    get:
+      consumes:
+      - application/json
+      description: 获取章节的所有解说版本号列表。
+      parameters:
+      - description: 章节ID
+        in: path
+        name: chapter_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '成功响应"  "{\"code\": 0, \"message\": \"获取成功\", \"data\": {\"chapter_id\":
+            \"...\", \"versions\": [1, 2, 3]}}'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+        "500":
+          description: 服务器内部错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+      summary: 获取章节解说版本列表
+      tags:
+      - 解说管理
+  /api/v1/novels/chapters/{chapter_id}/narrations:
+    get:
+      consumes:
+      - application/json
+      description: 列出指定章节的所有解说版本（包含 narration_id、version、prompt、status）
+      parameters:
+      - description: 章节ID
+        in: path
+        name: chapter_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+        "500":
+          description: 服务器内部错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+      summary: 列出章节解说版本
+      tags:
+      - 解说管理
+  /api/v1/novels/chapters/{chapter_id}/subtitles/versions:
+    get:
+      consumes:
+      - application/json
+      description: 获取章节的所有字幕版本号列表。
+      parameters:
+      - description: 章节ID
+        in: path
+        name: chapter_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '成功响应"  "{\"code\": 0, \"message\": \"获取成功\", \"data\": {\"chapter_id\":
+            \"...\", \"versions\": [1, 2, 3]}}'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+        "500":
+          description: 服务器内部错误
+          schema:
+            $ref: '#/definitions/novel.ErrorResponse'
+      summary: 获取字幕版本列表
+      tags:
+      - 字幕生成
+  /api/v1/novels/chapters/{chapter_id}/videos:
+    get:
+      responses: {}
   /api/v1/novels/chapters/{chapter_id}/videos/final:
     post:
       consumes:
@@ -720,6 +1412,67 @@ paths:
       summary: 根据状态查询视频
       tags:
       - 视频查询
+  /api/v1/workflow:
+    post:
+      consumes:
+      - application/json
+      description: 创建新的工作流实例
+      parameters:
+      - description: 创建工作流请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/workflow.CreateWorkflowRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/workflow.ErrorResponse'
+        "500":
+          description: 服务器内部错误
+          schema:
+            $ref: '#/definitions/workflow.ErrorResponse'
+      summary: 创建工作流
+      tags:
+      - 工作流
+  /api/v1/workflow/{id}/start:
+    post:
+      consumes:
+      - application/json
+      description: 启动待处理的工作流，开始执行剧本生成流程
+      parameters:
+      - description: 工作流ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/workflow.ErrorResponse'
+        "500":
+          description: 服务器内部错误
+          schema:
+            $ref: '#/definitions/workflow.ErrorResponse'
+      summary: 启动工作流
+      tags:
+      - 工作流
   /health:
     get:
       consumes:

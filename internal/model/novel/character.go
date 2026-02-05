@@ -22,12 +22,17 @@ type Character struct {
 	AgeGroup   string `bson:"age_group,omitempty" json:"age_group,omitempty"`     // 年龄段：青年/中年/老年/青少年/儿童
 	RoleNumber string `bson:"role_number,omitempty" json:"role_number,omitempty"` // 角色编号
 
+	Description string `bson:"description" json:"description"` // 角色详细描述
+	ImagePrompt  string `bson:"image_prompt" json:"image_prompt"` // 角色图片提示词
+
 	// Appearance 外貌特征
 	Appearance *CharacterAppearance `bson:"appearance,omitempty" json:"appearance,omitempty"`
 
 	// Clothing 服装风格
 	Clothing *CharacterClothing `bson:"clothing,omitempty" json:"clothing,omitempty"`
 
+	Status      TaskStatus `bson:"status" json:"status"`                           // 状态：pending, completed, failed
+	ErrorMessage string    `bson:"error_message,omitempty" json:"error_message,omitempty"` // 错误信息（失败时）
 	CreatedAt time.Time  `bson:"created_at" json:"created_at"`
 	UpdatedAt time.Time  `bson:"updated_at" json:"updated_at"`
 	DeletedAt *time.Time `bson:"deleted_at,omitempty" json:"deleted_at,omitempty"`

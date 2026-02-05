@@ -20,6 +20,7 @@ type SceneRepository interface {
 	FindByNarrationIDAndVersion(ctx context.Context, narrationID string, version int) ([]*novel.Scene, error)
 	FindByChapterID(ctx context.Context, chapterID string) ([]*novel.Scene, error)
 	Update(ctx context.Context, id string, updates map[string]interface{}) error
+	UpdateStatus(ctx context.Context, id string, status novel.TaskStatus, errorMessage string) error
 	Delete(ctx context.Context, id string) error
 	DeleteByNarrationID(ctx context.Context, narrationID string) error
 }
@@ -139,6 +140,25 @@ func (r *SceneRepo) Update(ctx context.Context, id string, updates map[string]in
 		ctx,
 		bson.M{"id": id},
 		bson.M{"$set": updates},
+	)
+	return err
+}
+
+// UpdateStatus 更新场景状态
+func (r *SceneRepo) UpdateStatus(ctx context.Context, id string, status novel.TaskStatus, errorMessage string) error {
+	update := bson.M{
+		"status":     status,
+		"updated_at": time.Now(),
+	}
+	if errorMessage != "" {
+		update["error_message"] = errorMessage
+	} else {
+		update["$unset"] = bson.M{"error_message": ""}
+	}
+	_, err := r.coll.UpdateOne(
+		ctx,
+		bson.M{"id": id},
+		bson.M{"$set": update},
 	)
 	return err
 }

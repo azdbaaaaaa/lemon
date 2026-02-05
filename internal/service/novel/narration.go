@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/rs/zerolog/log"
 
 	"lemon/internal/model/novel"
 	"lemon/internal/pkg/id"
@@ -65,32 +68,91 @@ func (s *novelService) GenerateNarrationForChapter(ctx context.Context, chapterI
 }
 
 func (s *novelService) generateNarrationForChapter(ctx context.Context, chapterID string) (*novel.Narration, string, error) {
+	startTime := time.Now()
+	log.Info().
+		Str("chapter_id", chapterID).
+		Msg("开始生成章节剧本")
+
 	ch, err := s.chapterRepo.FindByID(ctx, chapterID)
 	if err != nil {
+		log.Error().Err(err).Str("chapter_id", chapterID).Msg("获取章节信息失败")
 		return nil, "", err
 	}
+
+	log.Debug().
+		Str("chapter_id", chapterID).
+		Str("novel_id", ch.NovelID).
+		Int("sequence", ch.Sequence).
+		Int("word_count", ch.WordCount).
+		Msg("章节信息获取成功")
 
 	totalChapters, err := s.getTotalChapters(ctx, ch.NovelID)
 	if err != nil {
+		log.Error().Err(err).Str("novel_id", ch.NovelID).Msg("获取章节总数失败")
 		return nil, "", err
 	}
+
+	log.Debug().
+		Str("chapter_id", chapterID).
+		Int("total_chapters", totalChapters).
+		Msg("准备生成剧本 JSON")
 
 	prompt, filteredNarration, jsonContent, err := s.buildNarrationJSON(ctx, ch, totalChapters)
 	if err != nil {
+		log.Error().Err(err).
+			Str("chapter_id", chapterID).
+			Int("sequence", ch.Sequence).
+			Msg("生成剧本 JSON 失败")
 		return nil, "", err
 	}
+
+	log.Info().
+		Str("chapter_id", chapterID).
+		Int("scenes_count", len(jsonContent.Scenes)).
+		Int("total_shots", s.countTotalShots(jsonContent)).
+		Msg("剧本 JSON 生成成功")
 
 	nextVersion, err := s.getNextNarrationVersion(ctx, ch.ID)
 	if err != nil {
+		log.Error().Err(err).Str("chapter_id", chapterID).Msg("获取下一个版本号失败")
 		return nil, "", fmt.Errorf("failed to get next version: %w", err)
 	}
 
+	log.Debug().
+		Str("chapter_id", chapterID).
+		Int("version", nextVersion).
+		Msg("准备保存剧本数据")
+
 	narrationEntity, err := s.persistNarrationBatch(ctx, ch, nextVersion, prompt, jsonContent)
 	if err != nil {
+		log.Error().Err(err).
+			Str("chapter_id", chapterID).
+			Int("version", nextVersion).
+			Msg("保存剧本数据失败")
 		return nil, "", err
 	}
 
+	duration := time.Since(startTime)
+	log.Info().
+		Str("chapter_id", chapterID).
+		Str("narration_id", narrationEntity.ID).
+		Int("version", nextVersion).
+		Int("scenes_count", len(jsonContent.Scenes)).
+		Dur("duration", duration).
+		Msg("章节剧本生成完成")
+
 	return narrationEntity, filteredNarration, nil
+}
+
+// countTotalShots 统计总镜头数
+func (s *novelService) countTotalShots(jsonContent *noveltools.NarrationJSONContent) int {
+	count := 0
+	for _, scene := range jsonContent.Scenes {
+		if scene != nil {
+			count += len(scene.Shots)
+		}
+	}
+	return count
 }
 
 func (s *novelService) buildNarrationJSON(
@@ -98,29 +160,82 @@ func (s *novelService) buildNarrationJSON(
 	ch *novel.Chapter,
 	totalChapters int,
 ) (prompt string, filteredNarration string, jsonContent *noveltools.NarrationJSONContent, err error) {
+	log.Debug().
+		Str("chapter_id", ch.ID).
+		Int("sequence", ch.Sequence).
+		Int("word_count", ch.WordCount).
+		Msg("开始调用 LLM 生成剧本")
+
+	llmStartTime := time.Now()
 	generator := noveltools.NewNarrationGenerator(s.llmProvider)
 	prompt, narrationText, err := generator.GenerateWithPrompt(ctx, ch.ChapterText, ch.Sequence, totalChapters, ch.WordCount)
 	if err != nil {
+		log.Error().Err(err).
+			Str("chapter_id", ch.ID).
+			Dur("duration", time.Since(llmStartTime)).
+			Msg("LLM 生成剧本失败")
 		return "", "", nil, err
 	}
 
+	llmDuration := time.Since(llmStartTime)
+	log.Info().
+		Str("chapter_id", ch.ID).
+		Int("narration_length", len(narrationText)).
+		Dur("llm_duration", llmDuration).
+		Msg("LLM 生成剧本完成")
+
 	narrationText = strings.TrimSpace(narrationText)
 	if narrationText == "" {
+		log.Error().
+			Str("chapter_id", ch.ID).
+			Msg("LLM 返回的剧本内容为空")
 		return "", "", nil, fmt.Errorf("generated narrationText is empty")
 	}
 
+	log.Debug().
+		Str("chapter_id", ch.ID).
+		Msg("开始审核和过滤剧本内容")
+
 	filteredNarration, err = s.auditAndFilterNarration(ctx, narrationText, ch.Sequence)
 	if err != nil {
+		log.Warn().Err(err).
+			Str("chapter_id", ch.ID).
+			Msg("审核和过滤剧本内容失败，使用原始内容")
 		filteredNarration = narrationText
+	} else {
+		log.Debug().
+			Str("chapter_id", ch.ID).
+			Msg("剧本内容审核和过滤完成")
 	}
 
+	log.Debug().
+		Str("chapter_id", ch.ID).
+		Msg("开始解析剧本 JSON")
+
+	parseStartTime := time.Now()
 	jsonContent, err = noveltools.ParseNarrationJSON(filteredNarration)
 	if err != nil {
+		log.Error().Err(err).
+			Str("chapter_id", ch.ID).
+			Dur("duration", time.Since(parseStartTime)).
+			Msg("解析剧本 JSON 失败")
 		return "", "", nil, fmt.Errorf("narration parsing failed: %w", err)
 	}
+
 	if len(jsonContent.Scenes) == 0 {
+		log.Error().
+			Str("chapter_id", ch.ID).
+			Msg("剧本 JSON 验证失败：缺少 scenes 字段或 scenes 为空")
 		return "", "", nil, fmt.Errorf("narration validation failed: 缺少 scenes 字段或 scenes 为空")
 	}
+
+	parseDuration := time.Since(parseStartTime)
+	log.Info().
+		Str("chapter_id", ch.ID).
+		Int("scenes_count", len(jsonContent.Scenes)).
+		Int("total_shots", s.countTotalShots(jsonContent)).
+		Dur("parse_duration", parseDuration).
+		Msg("剧本 JSON 解析成功")
 
 	return prompt, filteredNarration, jsonContent, nil
 }
@@ -132,7 +247,15 @@ func (s *novelService) persistNarrationBatch(
 	prompt string,
 	jsonContent *noveltools.NarrationJSONContent,
 ) (*novel.Narration, error) {
+	persistStartTime := time.Now()
 	narrationID := id.New()
+
+	log.Debug().
+		Str("chapter_id", ch.ID).
+		Str("narration_id", narrationID).
+		Int("version", version).
+		Msg("开始保存剧本数据")
+
 	narrationEntity := &novel.Narration{
 		ID:         narrationID,
 		ChapterID:  ch.ID,
@@ -140,40 +263,142 @@ func (s *novelService) persistNarrationBatch(
 		UserID:     ch.UserID,
 		Prompt:     prompt,
 		Version:    version,
-		Status:     novel.TaskStatusCompleted,
+		Status:     novel.TaskStatusPending, // 初始状态为 pending，成功后再更新为 completed
 	}
 	if err := s.narrationRepo.Create(ctx, narrationEntity); err != nil {
+		log.Error().Err(err).
+			Str("chapter_id", ch.ID).
+			Str("narration_id", narrationID).
+			Msg("创建解说记录失败")
 		return nil, fmt.Errorf("failed to create narration record: %w", err)
 	}
 
+	log.Debug().
+		Str("narration_id", narrationID).
+		Msg("开始转换场景和镜头数据")
+
+	// 转换场景和镜头
+	convertStartTime := time.Now()
 	scenes, shots, err := noveltools.ConvertToScenesAndShots(narrationID, ch.ID, ch.WorkflowID, ch.UserID, version, jsonContent)
 	if err != nil {
+		errorMsg := fmt.Sprintf("failed to convert scenes and shots: %v", err)
+		log.Error().Err(err).
+			Str("narration_id", narrationID).
+			Dur("duration", time.Since(convertStartTime)).
+			Msg("转换场景和镜头数据失败")
+		// 更新状态为失败
+		_ = s.narrationRepo.UpdateStatus(ctx, narrationID, novel.TaskStatusFailed, errorMsg)
 		return nil, fmt.Errorf("failed to convert scenes and shots: %w", err)
 	}
+
+	convertDuration := time.Since(convertStartTime)
+	log.Info().
+		Str("narration_id", narrationID).
+		Int("scenes_count", len(scenes)).
+		Int("shots_count", len(shots)).
+		Dur("convert_duration", convertDuration).
+		Msg("场景和镜头数据转换完成")
+
+	// 保存场景
 	if len(scenes) > 0 {
+		log.Debug().
+			Str("narration_id", narrationID).
+			Int("scenes_count", len(scenes)).
+			Msg("开始保存场景数据")
+
+		saveScenesStartTime := time.Now()
 		if err := s.sceneRepo.CreateMany(ctx, scenes); err != nil {
+			errorMsg := fmt.Sprintf("failed to save scenes: %v", err)
+			log.Error().Err(err).
+				Str("narration_id", narrationID).
+				Int("scenes_count", len(scenes)).
+				Dur("duration", time.Since(saveScenesStartTime)).
+				Msg("保存场景数据失败")
+			// 更新状态为失败
+			_ = s.narrationRepo.UpdateStatus(ctx, narrationID, novel.TaskStatusFailed, errorMsg)
 			return nil, fmt.Errorf("failed to save scenes: %w", err)
 		}
+
+		saveScenesDuration := time.Since(saveScenesStartTime)
+		log.Info().
+			Str("narration_id", narrationID).
+			Int("scenes_count", len(scenes)).
+			Dur("save_duration", saveScenesDuration).
+			Msg("场景数据保存完成")
 	}
+
+	// 保存镜头
 	if len(shots) > 0 {
+		log.Debug().
+			Str("narration_id", narrationID).
+			Int("shots_count", len(shots)).
+			Msg("开始保存镜头数据")
+
+		saveShotsStartTime := time.Now()
 		if err := s.shotRepo.CreateMany(ctx, shots); err != nil {
+			errorMsg := fmt.Sprintf("failed to save shots: %v", err)
+			log.Error().Err(err).
+				Str("narration_id", narrationID).
+				Int("shots_count", len(shots)).
+				Dur("duration", time.Since(saveShotsStartTime)).
+				Msg("保存镜头数据失败")
+			// 更新状态为失败
+			_ = s.narrationRepo.UpdateStatus(ctx, narrationID, novel.TaskStatusFailed, errorMsg)
 			return nil, fmt.Errorf("failed to save shots: %w", err)
 		}
+
+		saveShotsDuration := time.Since(saveShotsStartTime)
+		log.Info().
+			Str("narration_id", narrationID).
+			Int("shots_count", len(shots)).
+			Dur("save_duration", saveShotsDuration).
+			Msg("镜头数据保存完成")
 	}
+
+	// 所有操作成功，更新状态为 completed
+	if err := s.narrationRepo.UpdateStatus(ctx, narrationID, novel.TaskStatusCompleted, ""); err != nil {
+		log.Error().Err(err).
+			Str("narration_id", narrationID).
+			Msg("更新解说状态失败")
+		return nil, fmt.Errorf("failed to update narration status: %w", err)
+	}
+	narrationEntity.Status = novel.TaskStatusCompleted
+
+	persistDuration := time.Since(persistStartTime)
+	log.Info().
+		Str("narration_id", narrationID).
+		Str("chapter_id", ch.ID).
+		Int("version", version).
+		Int("scenes_count", len(scenes)).
+		Int("shots_count", len(shots)).
+		Dur("persist_duration", persistDuration).
+		Msg("剧本数据保存完成")
+
 	return narrationEntity, nil
 }
 
 // GenerateNarrationsForAllChapters 第三步：并发地根据每一章节内容生成章节对应的章节解说
 func (s *novelService) GenerateNarrationsForAllChapters(ctx context.Context, novelID string) error {
+	log.Info().
+		Str("novel_id", novelID).
+		Msg("开始为所有章节生成剧本")
+
 	chapters, err := s.chapterRepo.FindByNovelID(ctx, novelID)
 	if err != nil {
+		log.Error().Err(err).Str("novel_id", novelID).Msg("获取章节列表失败")
 		return fmt.Errorf("failed to find chapters: %w", err)
 	}
 	if len(chapters) == 0 {
+		log.Warn().Str("novel_id", novelID).Msg("未找到章节")
 		return fmt.Errorf("no chapters found for novelID=%s", novelID)
 	}
 
 	totalChapters := len(chapters)
+	log.Info().
+		Str("novel_id", novelID).
+		Int("total_chapters", totalChapters).
+		Msg("准备并发生成所有章节的剧本")
+
 	var wg sync.WaitGroup
 	errCh := make(chan error, totalChapters)
 
@@ -182,16 +407,40 @@ func (s *novelService) GenerateNarrationsForAllChapters(ctx context.Context, nov
 		go func(chapter *novel.Chapter) {
 			defer wg.Done()
 
+			log.Debug().
+				Str("chapter_id", chapter.ID).
+				Int("sequence", chapter.Sequence).
+				Int("word_count", chapter.WordCount).
+				Msg("开始生成章节剧本")
+
 			generator := noveltools.NewNarrationGenerator(s.llmProvider)
 			// 传递章节字数，用于根据章节长度调整 prompt 要求
+			llmStartTime := time.Now()
 			prompt, narrationText, err := generator.GenerateWithPrompt(ctx, chapter.ChapterText, chapter.Sequence, totalChapters, chapter.WordCount)
 			if err != nil {
+				log.Error().Err(err).
+					Str("chapter_id", chapter.ID).
+					Int("sequence", chapter.Sequence).
+					Dur("duration", time.Since(llmStartTime)).
+					Msg("LLM 生成章节剧本失败")
 				errCh <- fmt.Errorf("failed to generate narration for chapter %d: %w", chapter.Sequence, err)
 				return
 			}
 
+			llmDuration := time.Since(llmStartTime)
+			log.Info().
+				Str("chapter_id", chapter.ID).
+				Int("sequence", chapter.Sequence).
+				Int("narration_length", len(narrationText)).
+				Dur("llm_duration", llmDuration).
+				Msg("LLM 生成章节剧本完成")
+
 			narrationText = strings.TrimSpace(narrationText)
 			if narrationText == "" {
+				log.Error().
+					Str("chapter_id", chapter.ID).
+					Int("sequence", chapter.Sequence).
+					Msg("LLM 返回的剧本内容为空")
 				errCh <- fmt.Errorf("generated narrationText is empty for chapter %d", chapter.Sequence)
 				return
 			}
@@ -205,17 +454,36 @@ func (s *novelService) GenerateNarrationsForAllChapters(ctx context.Context, nov
 			}
 
 			// 步骤2: 解析 JSON 格式并验证
+			parseStartTime := time.Now()
 			jsonContent, err := noveltools.ParseNarrationJSON(filteredNarration)
 			if err != nil {
+				log.Error().Err(err).
+					Str("chapter_id", chapter.ID).
+					Int("sequence", chapter.Sequence).
+					Dur("duration", time.Since(parseStartTime)).
+					Msg("解析章节剧本 JSON 失败")
 				errCh <- fmt.Errorf("failed to parse narration for chapter %d: %w", chapter.Sequence, err)
 				return
 			}
 
 			// 基本验证：至少要有场景
 			if len(jsonContent.Scenes) == 0 {
+				log.Error().
+					Str("chapter_id", chapter.ID).
+					Int("sequence", chapter.Sequence).
+					Msg("剧本 JSON 验证失败：缺少 scenes 字段或 scenes 为空")
 				errCh <- fmt.Errorf("failed to validate narration for chapter %d: 缺少 scenes 字段或 scenes 为空", chapter.Sequence)
 				return
 			}
+
+			parseDuration := time.Since(parseStartTime)
+			log.Info().
+				Str("chapter_id", chapter.ID).
+				Int("sequence", chapter.Sequence).
+				Int("scenes_count", len(jsonContent.Scenes)).
+				Int("total_shots", s.countTotalShots(jsonContent)).
+				Dur("parse_duration", parseDuration).
+				Msg("章节剧本 JSON 解析成功")
 
 			// 生成下一个版本号（自动递增）
 			nextVersion, err := s.getNextNarrationVersion(ctx, chapter.ID)
@@ -274,8 +542,19 @@ func (s *novelService) GenerateNarrationsForAllChapters(ctx context.Context, nov
 	}
 
 	if len(errors) > 0 {
+		log.Error().
+			Str("novel_id", novelID).
+			Int("total_chapters", totalChapters).
+			Int("failed_count", len(errors)).
+			Int("success_count", totalChapters-len(errors)).
+			Msg("部分章节剧本生成失败")
 		return fmt.Errorf("failed to generate narrations for %d chapters: %v", len(errors), errors)
 	}
+
+	log.Info().
+		Str("novel_id", novelID).
+		Int("total_chapters", totalChapters).
+		Msg("所有章节剧本生成完成")
 
 	return nil
 }
