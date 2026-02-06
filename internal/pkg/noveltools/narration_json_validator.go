@@ -7,7 +7,13 @@ import (
 	"strings"
 )
 
-// cleanJSONContent 清理 LLM 返回的 JSON 内容
+// CleanJSONContent 清理 LLM 返回的 JSON 内容（公开函数）
+// 移除 markdown 代码块标记，修复常见的 JSON 格式问题
+func CleanJSONContent(content string) string {
+	return cleanJSONContent(content)
+}
+
+// cleanJSONContent 清理 LLM 返回的 JSON 内容（私有函数）
 // 移除 markdown 代码块标记，修复常见的 JSON 格式问题
 func cleanJSONContent(content string) string {
 	// 移除首尾空白
@@ -36,30 +42,50 @@ func cleanJSONContent(content string) string {
 }
 
 // NarrationJSONContent 临时结构体，用于解析 JSON（不保存到数据库）
-// 注意：这些结构体仅用于解析 LLM 返回的 JSON，解析后会转换为 Scene 和 Shot 实体保存到数据库
+// 注意：这些结构体仅用于解析 LLM 返回的 JSON，解析后会转换为 Scene、Shot、Character、Prop 实体保存到数据库
 type NarrationJSONContent struct {
-	Scenes []*NarrationJSONScene `json:"scenes"`
+	Characters []*NarrationJSONCharacter `json:"characters,omitempty"` // 角色列表（可选）
+	Props      []*NarrationJSONProp      `json:"props,omitempty"`      // 道具列表（可选）
+	Scenes     []*NarrationJSONScene     `json:"scenes"`               // 场景列表（必需）
+}
+
+// NarrationJSONCharacter 临时角色结构体
+type NarrationJSONCharacter struct {
+	Name       string `json:"name"`                  // 角色姓名
+	Gender     string `json:"gender,omitempty"`      // 性别：男/女
+	AgeGroup   string `json:"age_group,omitempty"`   // 年龄段：青年/中年/老年/青少年/儿童
+	RoleNumber string `json:"role_number,omitempty"` // 角色编号
+	Description string `json:"description,omitempty"` // 角色详细描述
+	ImagePrompt string `json:"image_prompt,omitempty"` // 角色图片提示词
+}
+
+// NarrationJSONProp 临时道具结构体
+type NarrationJSONProp struct {
+	Name        string `json:"name"`                  // 道具名称
+	Description string `json:"description,omitempty"` // 道具详细描述
+	ImagePrompt string `json:"image_prompt,omitempty"` // 道具图片提示词
+	Category    string `json:"category,omitempty"`    // 道具类别（如：武器、法器、丹药等）
 }
 
 // NarrationJSONScene 临时场景结构体
 type NarrationJSONScene struct {
-	SceneNumber string              `json:"scene_number"`
-	Description string              `json:"description"`              // 场景详细描述
-	ImagePrompt string              `json:"image_prompt"`              // 场景图片提示词
-	Narration   string              `json:"narration,omitempty"`      // 场景级别的解说内容（可选）
+	SceneNumber string               `json:"scene_number"`
+	Description string               `json:"description"`         // 场景详细描述
+	ImagePrompt string               `json:"image_prompt"`        // 场景图片提示词
+	Narration   string               `json:"narration,omitempty"` // 场景级别的解说内容（可选）
 	Shots       []*NarrationJSONShot `json:"shots"`
 }
 
 // NarrationJSONShot 临时镜头结构体
 type NarrationJSONShot struct {
-	CloseupNumber  string  `json:"closeup_number"`  // 镜头编号
-	Character      string  `json:"character"`       // 角色名称
-	Image          string  `json:"image"`           // 画面描述
-	Narration      string  `json:"narration"`       // 旁白
-	SoundEffect    string  `json:"sound_effect,omitempty"` // 音效描述
-	Duration       float64 `json:"duration,omitempty"`      // 时长（秒）
-	ImagePrompt    string  `json:"image_prompt"`    // 镜头图片提示词
-	VideoPrompt    string  `json:"video_prompt"`    // 镜头视频提示词
+	CloseupNumber  string  `json:"closeup_number"`            // 镜头编号
+	Character      string  `json:"character"`                 // 角色名称
+	Image          string  `json:"image"`                     // 画面描述
+	Narration      string  `json:"narration"`                 // 旁白
+	SoundEffect    string  `json:"sound_effect,omitempty"`    // 音效描述
+	Duration       float64 `json:"duration,omitempty"`        // 时长（秒）
+	ImagePrompt    string  `json:"image_prompt"`              // 镜头图片提示词
+	VideoPrompt    string  `json:"video_prompt"`              // 镜头视频提示词
 	CameraMovement string  `json:"camera_movement,omitempty"` // 运镜方式
 }
 

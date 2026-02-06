@@ -13,10 +13,10 @@ import (
 // 说明：每个 shot 对应一个字幕文件（ASS格式），通过 sequence 与音频片段对应
 type Subtitle struct {
 	ID                 string     `bson:"id" json:"id"`                                     // 字幕ID（UUID）
-	ChapterID          string     `bson:"chapter_id" json:"chapter_id"`                     // 关联的章节ID
-	NarrationID        string     `bson:"narration_id" json:"narration_id"`                 // 关联的解说ID
-	WorkflowID         string     `bson:"workflow_id" json:"workflow_id"`                   // 关联的工作流ID
-	UserID             string     `bson:"user_id" json:"user_id"`                           // 用户ID
+	ChapterID   string `bson:"chapter_id" json:"chapter_id"`     // 关联的章节ID
+	NarrationID string `bson:"narration_id" json:"narration_id"` // 关联的解说ID
+	NovelID     string `bson:"novel_id" json:"novel_id"`         // 关联的小说ID
+	UserID      string `bson:"user_id" json:"user_id"`           // 用户ID
 	Sequence           int        `bson:"sequence" json:"sequence"`                         // 序号（对应 shot 的顺序，从1开始）
 	SubtitleResourceID string     `bson:"subtitle_resource_id" json:"subtitle_resource_id"` // 字幕文件的 resource_id
 	Format             SubtitleFormat `bson:"format" json:"format"`                             // 字幕格式：ass, srt, vtt
@@ -42,8 +42,8 @@ func (s *Subtitle) EnsureIndexes(ctx context.Context, db *mongo.Database) error 
 			Options: options.Index().SetName("idx_chapter_id"),
 		},
 		{
-			Keys:    bson.D{{Key: "workflow_id", Value: 1}},
-			Options: options.Index().SetName("idx_workflow_id"),
+			Keys:    bson.D{{Key: "novel_id", Value: 1}},
+			Options: options.Index().SetName("idx_novel_id"),
 		},
 		{
 			Keys:    bson.D{{Key: "narration_id", Value: 1}},

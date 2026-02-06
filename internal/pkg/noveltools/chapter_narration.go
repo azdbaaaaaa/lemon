@@ -98,20 +98,37 @@ func buildChapterNarrationPrompt(chapterContent string, chapterNum, totalChapter
 	b.WriteString("你是一名专业的中文小说解说文案撰写助手。\n")
 	b.WriteString("请基于下面给出的章节内容，生成适合短视频解说的结构化解说文案。\n\n")
 
-	b.WriteString("【重要输出格式要求】\n")
-	b.WriteString("1. 必须只返回纯 JSON 格式的内容，不要添加任何其他文字\n")
-	b.WriteString("2. 不要使用 markdown 代码块标记（不要使用 ```json 或 ```）\n")
-	b.WriteString("3. 不要添加任何解释、说明或注释\n")
-	b.WriteString("4. 直接以 { 开头，以 } 结尾\n")
-	b.WriteString("5. 确保 JSON 格式完全正确，可以直接被 JSON 解析器解析\n")
-	b.WriteString("6. **严格禁止在数组或对象的最后一个元素后添加逗号**（例如：不要写成 [1, 2, 3,] 或 {\"key\": \"value\",}）\n")
-	b.WriteString("7. 确保所有字符串值都使用双引号，不要使用单引号\n")
-	b.WriteString("8. 确保所有键名都使用双引号\n")
-	b.WriteString("9. 不要在 JSON 中添加注释（JSON 不支持注释）\n\n")
+	b.WriteString("【⚠️ 关键输出格式要求 - 必须严格遵守】\n")
+	b.WriteString("你的输出必须是一个有效的 JSON 对象，可以直接被 JSON.parse() 或 json.Unmarshal() 解析。\n\n")
+
+	b.WriteString("【JSON 格式检查清单 - 输出前必须逐项检查】\n")
+	b.WriteString("✓ 1. 输出必须以单个左花括号 { 开头，以单个右花括号 } 结尾\n")
+	b.WriteString("✓ 2. 不要使用 markdown 代码块标记（绝对不要使用 ```json 或 ```）\n")
+	b.WriteString("✓ 3. 不要添加任何解释、说明、注释或额外文字，只输出 JSON\n")
+	b.WriteString("✓ 4. 所有键名必须使用双引号包裹（例如：\"scene_number\"，不要使用单引号）\n")
+	b.WriteString("✓ 5. 所有字符串值必须使用双引号包裹（例如：\"场景描述\"，不要使用单引号）\n")
+	b.WriteString("✓ 6. **绝对禁止在数组最后一个元素后添加逗号**（错误示例：[1, 2, 3,]，正确示例：[1, 2, 3]）\n")
+	b.WriteString("✓ 7. **绝对禁止在对象最后一个属性后添加逗号**（错误示例：{\"key\": \"value\",}，正确示例：{\"key\": \"value\"}）\n")
+	b.WriteString("✓ 8. 不要在 JSON 中添加任何注释（JSON 标准不支持 // 或 /* */ 注释）\n")
+	b.WriteString("✓ 9. 确保所有字符串中的特殊字符都已正确转义（\\n, \\t, \\\", \\\\ 等）\n")
+	b.WriteString("✓ 10. 确保 JSON 结构完整，所有括号、方括号都正确配对\n")
+	b.WriteString("✓ 11. 输出前请使用 JSON 验证工具检查格式，确保可以解析\n\n")
+
+	b.WriteString("【输出格式】\n")
+	b.WriteString("你的输出必须是一个完整的、有效的 JSON 对象，格式如下：\n")
+	b.WriteString("{\n")
+	b.WriteString("  \"chapter_info\": {...},\n")
+	b.WriteString("  \"characters\": [...],\n")
+	b.WriteString("  \"props\": [...],\n")
+	b.WriteString("  \"scenes\": [...]\n")
+	b.WriteString("}\n")
+	b.WriteString("注意：最后一行 scenes 数组的最后一个元素后面不要有逗号！\n\n")
 
 	b.WriteString("【内容要求】\n")
 	b.WriteString("1. 必须生成7个场景（scene），每个场景包含1-3个分镜头（shot）\n")
 	b.WriteString("2. 每个分镜头必须包含：解说内容（narration）、图片描述（scene_prompt）、视频描述（video_prompt）\n")
+	b.WriteString("3. 必须提取并列出本章节中出现的所有角色（characters），包括角色的基本信息（姓名、性别、年龄段、角色编号）和详细描述（外貌、性格、背景等），以及角色图片提示词\n")
+	b.WriteString("4. 必须提取并列出本章节中出现的所有重要道具（props），包括道具的名称、描述、类别（如：武器、法器、丹药、服饰等）和图片提示词\n")
 
 	// 根据章节长度调整字数要求
 	if chapterWordCount > 0 {
@@ -196,7 +213,17 @@ func buildChapterNarrationPrompt(chapterContent string, chapterNum, totalChapter
       "name": "角色姓名",
       "gender": "男/女",
       "age_group": "青年/中年/老年/青少年/儿童",
-      "role_number": "角色编号"
+      "role_number": "角色编号",
+      "description": "角色详细描述（外貌、性格、背景等）",
+      "image_prompt": "角色图片提示词（用于生成角色图片）"
+    }
+  ],
+  "props": [
+    {
+      "name": "道具名称",
+      "description": "道具详细描述",
+      "image_prompt": "道具图片提示词（用于生成道具图片）",
+      "category": "道具类别（如：武器、法器、丹药、服饰等）"
     }
   ],
   "scenes": [
@@ -234,12 +261,19 @@ func buildChapterNarrationPrompt(chapterContent string, chapterNum, totalChapter
     }
   ]
 }`)
-	b.WriteString("\n\n【再次强调】\n")
-	b.WriteString("1. 只返回 JSON 内容，不要任何 markdown 代码块标记\n")
-	b.WriteString("2. 不要添加任何解释文字，直接输出 JSON\n")
-	b.WriteString("3. **严格禁止在数组或对象的最后一个元素后添加逗号**（这是最常见的 JSON 格式错误，例如不要写成 [1, 2, 3,] 或 {\"key\": \"value\",}）\n")
-	b.WriteString("4. 必须生成7个场景（scene），每个场景包含1-3个分镜头（shot）\n")
-	b.WriteString("5. 每个分镜头必须包含：narration（解说内容）、scene_prompt（图片描述）、video_prompt（视频描述）\n")
+	b.WriteString("\n\n【⚠️ 最终检查 - 输出前必须确认】\n")
+	b.WriteString("在输出 JSON 之前，请按照以下步骤检查：\n")
+	b.WriteString("1. 确认输出以 { 开头，以 } 结尾，中间没有任何其他文字\n")
+	b.WriteString("2. 确认没有使用 ```json 或 ``` 等 markdown 标记\n")
+	b.WriteString("3. 确认所有数组和对象的最后一个元素后都没有逗号\n")
+	b.WriteString("4. 确认所有键名和字符串值都使用双引号，没有单引号\n")
+	b.WriteString("5. 确认没有添加任何注释（// 或 /* */）\n")
+	b.WriteString("6. 确认 JSON 结构完整，括号配对正确\n")
+	b.WriteString("7. 确认可以直接被 JSON 解析器解析（建议在输出前用 JSON 验证工具测试）\n\n")
+
+	b.WriteString("【内容要求】\n")
+	b.WriteString("1. 必须生成7个场景（scene），每个场景包含1-3个分镜头（shot）\n")
+	b.WriteString("2. 每个分镜头必须包含：narration（解说内容）、scene_prompt（图片描述）、video_prompt（视频描述）\n")
 
 	// 根据章节长度调整字数要求提示
 	if chapterWordCount > 0 {
@@ -262,10 +296,43 @@ func buildChapterNarrationPrompt(chapterContent string, chapterNum, totalChapter
 		b.WriteString("6. 确保解说内容总字数在1100-1300字之间\n")
 	}
 
-	b.WriteString("7. 输出必须以 { 开头，以 } 结尾\n")
 	b.WriteString("8. 解说内容（narration）必须只包含故事内容，禁止包含任何技术性描述（如\"室内场景\"、\"光影\"、\"近景拍摄\"等）\n")
-	b.WriteString("9. 所有技术性描述必须放在 scene_prompt 和 video_prompt 字段中，不要放在 narration 中\n")
-	b.WriteString("10. 输出前请仔细检查 JSON 格式，确保没有多余的逗号、没有单引号、没有注释\n")
+	b.WriteString("9. 所有技术性描述必须放在 scene_prompt 和 video_prompt 字段中，不要放在 narration 中\n\n")
+
+	b.WriteString("【JSON 格式示例 - 注意最后没有逗号】\n")
+	b.WriteString("正确的格式示例（注意 scenes 数组最后一个元素后没有逗号）：\n")
+	b.WriteString(`{
+  "scenes": [
+    {
+      "scene_number": "1",
+      "shots": [
+        {
+          "closeup_number": "1",
+          "narration": "解说内容",
+          "scene_prompt": "图片描述",
+          "video_prompt": "视频描述"
+        }
+      ]
+    },
+    {
+      "scene_number": "2",
+      "shots": [
+        {
+          "closeup_number": "1",
+          "narration": "解说内容",
+          "scene_prompt": "图片描述",
+          "video_prompt": "视频描述"
+        }
+      ]
+    }
+  ]
+}`)
+	b.WriteString("\n\n注意：上面示例中 scenes 数组的最后一个元素（scene_number: \"2\"）后面没有逗号！\n")
+	b.WriteString("这是正确的格式。错误的格式是：\"2\" 后面有逗号，或者 shots 数组最后一个元素后有逗号。\n\n")
+
+	b.WriteString("【最后提醒】\n")
+	b.WriteString("请严格按照上述要求输出 JSON，确保格式完全正确，可以直接被 JSON 解析器解析。\n")
+	b.WriteString("输出时不要添加任何前缀或后缀文字，直接输出 JSON 对象。\n")
 
 	return b.String()
 }

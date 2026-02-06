@@ -14,16 +14,16 @@ import (
 type Character struct {
 	ID string `bson:"id" json:"id"` // 角色ID（UUID）
 
-	NovelID    string `bson:"novel_id" json:"novel_id"`     // 关联的小说ID
-	WorkflowID string `bson:"workflow_id" json:"workflow_id"` // 关联的工作流ID
-	Name       string `bson:"name" json:"name"`              // 角色姓名
+	NovelID string `bson:"novel_id" json:"novel_id"` // 关联的小说ID
+	Name    string `bson:"name" json:"name"`         // 角色姓名
 
 	Gender     string `bson:"gender,omitempty" json:"gender,omitempty"`           // 性别：男/女
 	AgeGroup   string `bson:"age_group,omitempty" json:"age_group,omitempty"`     // 年龄段：青年/中年/老年/青少年/儿童
 	RoleNumber string `bson:"role_number,omitempty" json:"role_number,omitempty"` // 角色编号
 
-	Description string `bson:"description" json:"description"` // 角色详细描述
-	ImagePrompt  string `bson:"image_prompt" json:"image_prompt"` // 角色图片提示词
+	Description     string `bson:"description" json:"description"`           // 角色详细描述
+	ImagePrompt     string `bson:"image_prompt" json:"image_prompt"`          // 角色图片提示词
+	ImageResourceID string `bson:"image_resource_id,omitempty" json:"image_resource_id,omitempty"` // 角色图片的 resource_id
 
 	// Appearance 外貌特征
 	Appearance *CharacterAppearance `bson:"appearance,omitempty" json:"appearance,omitempty"`
@@ -63,10 +63,6 @@ func (c *Character) EnsureIndexes(ctx context.Context, db *mongo.Database) error
 		{
 			Keys:    bson.D{{Key: "novel_id", Value: 1}},
 			Options: options.Index().SetName("idx_novel_id"),
-		},
-		{
-			Keys:    bson.D{{Key: "workflow_id", Value: 1}},
-			Options: options.Index().SetName("idx_workflow_id"),
 		},
 		{
 			Keys:    bson.D{{Key: "novel_id", Value: 1}, {Key: "name", Value: 1}},

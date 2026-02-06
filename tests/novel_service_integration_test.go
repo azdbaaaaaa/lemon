@@ -17,7 +17,7 @@ import (
 
 	. "github.com/smartystreets/goconvey/convey"
 
-	"lemon/internal/pkg/id"
+	"lemon/internal/model/novel"
 	"lemon/internal/service"
 	novelservice "lemon/internal/service/novel"
 )
@@ -51,7 +51,6 @@ func TestNovelService_Integration(t *testing.T) {
 		So(err, ShouldBeNil)
 
 		userID := "test_user_001"
-		workflowID := id.New()
 
 		Convey("步骤1: 上传文件并创建资源", func() {
 			// 使用服务端上传方式（UploadFile）
@@ -77,7 +76,7 @@ func TestNovelService_Integration(t *testing.T) {
 			}
 
 			Convey("步骤2: 创建小说", func() {
-				novelID, err := novelService.CreateNovelFromResource(ctx, completeResult.ResourceID, userID, workflowID)
+				novelID, err := novelService.CreateNovelFromResource(ctx, completeResult.ResourceID, userID, novel.NarrationTypeNarration, novel.NovelStyleAnime)
 				So(err, ShouldBeNil)
 				So(novelID, ShouldNotBeEmpty)
 
@@ -102,7 +101,6 @@ func TestNovelService_Integration(t *testing.T) {
 						for i, ch := range chapters {
 							So(ch.Sequence, ShouldEqual, i+1)
 							So(ch.NovelID, ShouldEqual, novelID)
-							So(ch.WorkflowID, ShouldEqual, workflowID)
 							So(ch.UserID, ShouldEqual, userID)
 							So(ch.Title, ShouldNotBeEmpty)
 							So(ch.ChapterText, ShouldNotBeEmpty)

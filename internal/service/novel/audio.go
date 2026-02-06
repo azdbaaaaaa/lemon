@@ -168,7 +168,7 @@ func (s *novelService) generateSingleAudio(
 		}
 	}
 
-	// 获取章节信息以获取 workflow_id
+	// 获取章节信息以获取 novel_id
 	chapter, err := s.chapterRepo.FindByID(ctx, narration.ChapterID)
 	if err != nil {
 		return "", fmt.Errorf("find chapter: %w", err)
@@ -177,11 +177,11 @@ func (s *novelService) generateSingleAudio(
 	// 8. 创建 chapter_audio 记录
 	audioID := id.New()
 	audioEntity := &novel.Audio{
-		ID:              audioID,
-		NarrationID:     narration.ID,
-		ChapterID:       narration.ChapterID,
-		WorkflowID:      chapter.WorkflowID,
-		UserID:          narration.UserID,
+		ID:          audioID,
+		NarrationID: narration.ID,
+		ChapterID:   narration.ChapterID,
+		NovelID:     chapter.NovelID,
+		UserID:      narration.UserID,
 		Sequence:        sequence,
 		AudioResourceID: resourceID,
 		Duration:        audioDuration,

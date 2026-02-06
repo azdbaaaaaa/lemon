@@ -4,13 +4,16 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+
+	novelmodel "lemon/internal/model/novel"
 )
 
 // CreateNovelRequest 创建小说请求
 type CreateNovelRequest struct {
-	ResourceID string `json:"resource_id" binding:"required"` // 资源ID（必填）
-	UserID     string `json:"user_id" binding:"required"`     // 用户ID（必填）
-	WorkflowID string `json:"workflow_id" binding:"required"` // 工作流ID（必填）
+	ResourceID    string `json:"resource_id" binding:"required"`    // 资源ID（必填）
+	UserID        string `json:"user_id" binding:"required"`        // 用户ID（必填）
+	NarrationType string `json:"narration_type" binding:"required"` // 旁白类型：narration（旁白/解说）或 dialogue（真人对话）
+	Style         string `json:"style" binding:"required"`          // 风格：anime（漫剧）、live（真人剧）、mixed（混合）
 }
 
 // CreateNovelResponseData 创建小说响应数据
@@ -42,8 +45,39 @@ func (h *Handler) CreateNovel(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
+	// 将请求中的字符串类型转换为枚举类型
+	var narrationType novelmodel.NarrationType
+	switch req.NarrationType {
+	case string(novelmodel.NarrationTypeNarration):
+		narrationType = novelmodel.NarrationTypeNarration
+	case string(novelmodel.NarrationTypeDialogue):
+		narrationType = novelmodel.NarrationTypeDialogue
+	default:
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Code:    40002,
+			Message: "invalid narration_type, must be narration or dialogue",
+		})
+		return
+	}
+
+	var style novelmodel.NovelStyle
+	switch req.Style {
+	case string(novelmodel.NovelStyleAnime):
+		style = novelmodel.NovelStyleAnime
+	case string(novelmodel.NovelStyleLive):
+		style = novelmodel.NovelStyleLive
+	case string(novelmodel.NovelStyleMixed):
+		style = novelmodel.NovelStyleMixed
+	default:
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Code:    40003,
+			Message: "invalid style, must be anime, live, or mixed",
+		})
+		return
+	}
+
 	// 调用Service层
-	novelID, err := h.novelService.CreateNovelFromResource(ctx, req.ResourceID, req.UserID, req.WorkflowID)
+	novelID, err := h.novelService.CreateNovelFromResource(ctx, req.ResourceID, req.UserID, narrationType, style)
 	if err != nil {
 		code := http.StatusInternalServerError
 		errorCode := 50001

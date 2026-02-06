@@ -60,7 +60,6 @@ type NovelInfo struct {
 	ID          string `json:"id"`                    // 小说ID
 	ResourceID  string `json:"resource_id"`           // 资源ID
 	UserID      string `json:"user_id"`               // 用户ID
-	WorkflowID  string `json:"workflow_id"`           // 工作流ID
 	Title       string `json:"title,omitempty"`       // 小说名称
 	Author      string `json:"author,omitempty"`      // 作者
 	Description string `json:"description,omitempty"` // 简介
@@ -74,7 +73,6 @@ func toNovelInfo(novelEntity *novel.Novel) NovelInfo {
 		ID:          novelEntity.ID,
 		ResourceID:  novelEntity.ResourceID,
 		UserID:      novelEntity.UserID,
-		WorkflowID:  novelEntity.WorkflowID,
 		Title:       novelEntity.Title,
 		Author:      novelEntity.Author,
 		Description: novelEntity.Description,
@@ -87,7 +85,6 @@ func toNovelInfo(novelEntity *novel.Novel) NovelInfo {
 type ChapterInfo struct {
 	ID          string `json:"id"`           // 章节ID
 	NovelID     string `json:"novel_id"`     // 小说ID
-	WorkflowID  string `json:"workflow_id"`  // 工作流ID
 	UserID      string `json:"user_id"`      // 用户ID
 	Sequence    int    `json:"sequence"`     // 章节序号
 	Title       string `json:"title"`        // 章节标题
@@ -104,7 +101,6 @@ func toChapterInfo(chapterEntity *novel.Chapter) ChapterInfo {
 	return ChapterInfo{
 		ID:          chapterEntity.ID,
 		NovelID:     chapterEntity.NovelID,
-		WorkflowID:  chapterEntity.WorkflowID,
 		UserID:      chapterEntity.UserID,
 		Sequence:    chapterEntity.Sequence,
 		Title:       chapterEntity.Title,

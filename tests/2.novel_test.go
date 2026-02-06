@@ -16,7 +16,7 @@ import (
 
 	. "github.com/smartystreets/goconvey/convey"
 
-	"lemon/internal/pkg/id"
+	"lemon/internal/model/novel"
 )
 
 // TestNovelService_CreateAndSplit 测试根据上传的资源创建小说并切分章节
@@ -27,13 +27,12 @@ func TestNovelService_CreateAndSplit(t *testing.T) {
 		services := testServices
 
 		userID := "test_user_novel_001"
-		workflowID := id.New()
 
 		// 步骤1: 查找或上传测试文件（优先使用数据库中已有的资源）
 		resourceID := findOrUploadTestFile(ctx, t, services, userID)
 
 		Convey("步骤2: 根据资源创建小说", func() {
-			novelID, err := services.NovelService.CreateNovelFromResource(ctx, resourceID, userID, workflowID)
+			novelID, err := services.NovelService.CreateNovelFromResource(ctx, resourceID, userID, novel.NarrationTypeNarration, novel.NovelStyleAnime)
 			So(err, ShouldBeNil)
 			So(novelID, ShouldNotBeEmpty)
 
@@ -42,7 +41,6 @@ func TestNovelService_CreateAndSplit(t *testing.T) {
 			So(err, ShouldBeNil)
 			So(novelEntity.ResourceID, ShouldEqual, resourceID)
 			So(novelEntity.UserID, ShouldEqual, userID)
-			So(novelEntity.WorkflowID, ShouldEqual, workflowID)
 
 			Convey("步骤3: 切分章节", func() {
 				targetChapters := 50
@@ -60,7 +58,6 @@ func TestNovelService_CreateAndSplit(t *testing.T) {
 					for i, ch := range chapters {
 						So(ch.Sequence, ShouldEqual, i+1)
 						So(ch.NovelID, ShouldEqual, novelID)
-						So(ch.WorkflowID, ShouldEqual, workflowID)
 						So(ch.UserID, ShouldEqual, userID)
 						So(ch.Title, ShouldNotBeEmpty)
 						So(ch.ChapterText, ShouldNotBeEmpty)

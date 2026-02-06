@@ -10,19 +10,17 @@ import (
 )
 
 // Chapter 章节实体
-// 说明：章节以 UUID 为主键，关联 novel_id；解说文本存于 narration_text 字段。
+// 说明：章节以 UUID 为主键，关联 novel_id；解说内容由 Narration/Scene/Shot 等表单独存储。
 type Chapter struct {
 	ID string `bson:"id" json:"id"` // 章节ID（UUID）
 
-	NovelID    string `bson:"novel_id" json:"novel_id"`
-	WorkflowID string `bson:"workflow_id" json:"workflow_id"`
-	UserID     string `bson:"user_id" json:"user_id"`
+	NovelID string `bson:"novel_id" json:"novel_id"`
+	UserID  string `bson:"user_id" json:"user_id"`
 
 	Sequence int    `bson:"sequence" json:"sequence"` // 章节序号，从1开始
 	Title    string `bson:"title" json:"title"`
 
-	ChapterText   string `bson:"chapter_text" json:"chapter_text"`                         // 章节全文
-	NarrationText string `bson:"narration_text,omitempty" json:"narration_text,omitempty"` // 单章节解说文本（生成后写入）
+	ChapterText string `bson:"chapter_text" json:"chapter_text"` // 章节全文
 
 	// 章节统计信息
 	TotalChars int `bson:"total_chars" json:"total_chars"` // 章节总字符数（中文字符，包括标点）
@@ -47,10 +45,6 @@ func (c *Chapter) EnsureIndexes(ctx context.Context, db *mongo.Database) error {
 				{Key: "sequence", Value: 1},
 			},
 			Options: options.Index().SetName("uniq_novel_sequence").SetUnique(true),
-		},
-		{
-			Keys:    bson.D{{Key: "workflow_id", Value: 1}},
-			Options: options.Index().SetName("idx_workflow_id"),
 		},
 		{
 			Keys:    bson.D{{Key: "novel_id", Value: 1}},

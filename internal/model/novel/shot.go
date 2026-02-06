@@ -14,12 +14,12 @@ import (
 // 不再需要 narration_id，直接通过 chapter_id + version 关联
 type Shot struct {
 	ID          string     `bson:"id" json:"id"`                     // 镜头ID（UUID）
-	SceneID     string     `bson:"scene_id" json:"scene_id"`        // 关联的场景ID
-	SceneNumber string     `bson:"scene_number" json:"scene_number"` // 场景编号（冗余字段，方便查询，字符串，如 "1"）
-	NarrationID string     `bson:"narration_id" json:"narration_id"` // 关联的解说ID（批次标识）
-	ChapterID   string     `bson:"chapter_id" json:"chapter_id"`    // 关联的章节ID
-	WorkflowID  string     `bson:"workflow_id" json:"workflow_id"`   // 关联的工作流ID
-	UserID      string     `bson:"user_id" json:"user_id"`          // 用户ID（冗余字段，方便查询）
+	SceneID     string `bson:"scene_id" json:"scene_id"`         // 关联的场景ID
+	SceneNumber string `bson:"scene_number" json:"scene_number"`  // 场景编号（冗余字段，方便查询，字符串，如 "1"）
+	NarrationID string `bson:"narration_id" json:"narration_id"`  // 关联的解说ID（批次标识）
+	ChapterID   string `bson:"chapter_id" json:"chapter_id"`     // 关联的章节ID
+	NovelID     string `bson:"novel_id" json:"novel_id"`         // 关联的小说ID
+	UserID      string `bson:"user_id" json:"user_id"`           // 用户ID（冗余字段，方便查询）
 	ShotNumber  string     `bson:"shot_number" json:"shot_number"`  // 镜头编号（字符串，如 "1"，原来的 closeup_number）
 	Character   string     `bson:"character,omitempty" json:"character,omitempty"` // 角色名称（特写中的主要角色）
 	Image       string     `bson:"image" json:"image"`               // 画面描述
@@ -57,8 +57,8 @@ func (s *Shot) EnsureIndexes(ctx context.Context, db *mongo.Database) error {
 			Options: options.Index().SetName("idx_chapter_id"),
 		},
 		{
-			Keys:    bson.D{{Key: "workflow_id", Value: 1}},
-			Options: options.Index().SetName("idx_workflow_id"),
+			Keys:    bson.D{{Key: "novel_id", Value: 1}},
+			Options: options.Index().SetName("idx_novel_id"),
 		},
 		{
 			Keys:    bson.D{{Key: "chapter_id", Value: 1}, {Key: "version", Value: 1}},

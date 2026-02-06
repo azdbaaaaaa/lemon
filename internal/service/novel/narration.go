@@ -2,12 +2,14 @@ package novel
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
+	"go.mongodb.org/mongo-driver/bson"
 
 	"lemon/internal/model/novel"
 	"lemon/internal/pkg/id"
@@ -49,6 +51,12 @@ type NarrationService interface {
 
 	// GetShotsByNarrationID 获取解说对应的镜头列表（用于人工编辑/比对）
 	GetShotsByNarrationID(ctx context.Context, narrationID string) ([]*novel.Shot, error)
+
+	// UpdateShot 更新分镜头信息
+	UpdateShot(ctx context.Context, shotID string, updates map[string]interface{}) error
+
+	// RegenerateShotScript 重新生成单个分镜头的脚本（调用 LLM）
+	RegenerateShotScript(ctx context.Context, shotID string) error
 }
 
 // GenerateNarrationForChapterWithMeta 为单一章节生成章节解说，并保存到 narrations/scenes/shots 表
@@ -257,13 +265,13 @@ func (s *novelService) persistNarrationBatch(
 		Msg("开始保存剧本数据")
 
 	narrationEntity := &novel.Narration{
-		ID:         narrationID,
-		ChapterID:  ch.ID,
-		WorkflowID: ch.WorkflowID,
-		UserID:     ch.UserID,
-		Prompt:     prompt,
-		Version:    version,
-		Status:     novel.TaskStatusPending, // 初始状态为 pending，成功后再更新为 completed
+		ID:        narrationID,
+		ChapterID: ch.ID,
+		NovelID:   ch.NovelID,
+		UserID:    ch.UserID,
+		Prompt:    prompt,
+		Version:   version,
+		Status:    novel.TaskStatusPending, // 初始状态为 pending，成功后再更新为 completed
 	}
 	if err := s.narrationRepo.Create(ctx, narrationEntity); err != nil {
 		log.Error().Err(err).
@@ -277,9 +285,9 @@ func (s *novelService) persistNarrationBatch(
 		Str("narration_id", narrationID).
 		Msg("开始转换场景和镜头数据")
 
-	// 转换场景和镜头
+	// 转换场景、镜头、角色和道具
 	convertStartTime := time.Now()
-	scenes, shots, err := noveltools.ConvertToScenesAndShots(narrationID, ch.ID, ch.WorkflowID, ch.UserID, version, jsonContent)
+	scenes, shots, characters, props, err := noveltools.ConvertToScenesAndShots(narrationID, ch.ID, ch.NovelID, ch.UserID, version, jsonContent)
 	if err != nil {
 		errorMsg := fmt.Sprintf("failed to convert scenes and shots: %v", err)
 		log.Error().Err(err).
@@ -296,8 +304,10 @@ func (s *novelService) persistNarrationBatch(
 		Str("narration_id", narrationID).
 		Int("scenes_count", len(scenes)).
 		Int("shots_count", len(shots)).
+		Int("characters_count", len(characters)).
+		Int("props_count", len(props)).
 		Dur("convert_duration", convertDuration).
-		Msg("场景和镜头数据转换完成")
+		Msg("场景、镜头、角色和道具数据转换完成")
 
 	// 保存场景
 	if len(scenes) > 0 {
@@ -353,6 +363,114 @@ func (s *novelService) persistNarrationBatch(
 			Int("shots_count", len(shots)).
 			Dur("save_duration", saveShotsDuration).
 			Msg("镜头数据保存完成")
+	}
+
+	// 保存角色（去重：如果角色已存在，则更新；否则创建）
+	if len(characters) > 0 {
+		log.Debug().
+			Str("narration_id", narrationID).
+			Int("characters_count", len(characters)).
+			Msg("开始保存角色数据")
+
+		saveCharsStartTime := time.Now()
+		for _, char := range characters {
+			// 检查角色是否已存在
+			existing, err := s.characterRepo.FindByNameAndNovelID(ctx, char.Name, ch.NovelID)
+			if err == nil && existing != nil {
+				// 角色已存在，更新信息（保留已有的图片等）
+				updates := bson.M{
+					"updated_at": time.Now(),
+				}
+				if char.Gender != "" {
+					updates["gender"] = char.Gender
+				}
+				if char.AgeGroup != "" {
+					updates["age_group"] = char.AgeGroup
+				}
+				if char.RoleNumber != "" {
+					updates["role_number"] = char.RoleNumber
+				}
+				if char.Description != "" {
+					updates["description"] = char.Description
+				}
+				if char.ImagePrompt != "" {
+					updates["image_prompt"] = char.ImagePrompt
+				}
+				if err := s.characterRepo.Update(ctx, existing.ID, updates); err != nil {
+					log.Warn().Err(err).
+						Str("character_id", existing.ID).
+						Str("character_name", existing.Name).
+						Msg("更新角色信息失败，继续处理")
+				}
+			} else {
+				// 角色不存在，创建新角色
+				char.CreatedAt = time.Now()
+				char.UpdatedAt = time.Now()
+				if err := s.characterRepo.Create(ctx, char); err != nil {
+					log.Warn().Err(err).
+						Str("character_name", char.Name).
+						Msg("创建角色失败，继续处理")
+				}
+			}
+		}
+
+		saveCharsDuration := time.Since(saveCharsStartTime)
+		log.Info().
+			Str("narration_id", narrationID).
+			Int("characters_count", len(characters)).
+			Dur("save_duration", saveCharsDuration).
+			Msg("角色数据保存完成")
+	}
+
+	// 保存道具（去重：如果道具已存在，则更新；否则创建）
+	if len(props) > 0 {
+		log.Debug().
+			Str("narration_id", narrationID).
+			Int("props_count", len(props)).
+			Msg("开始保存道具数据")
+
+		savePropsStartTime := time.Now()
+		for _, prop := range props {
+			// 检查道具是否已存在
+			existing, err := s.propRepo.FindByName(ctx, ch.NovelID, prop.Name)
+			if err == nil && existing != nil {
+				// 道具已存在，更新信息（保留已有的图片等）
+				updates := map[string]interface{}{
+					"updated_at": time.Now(),
+				}
+				if prop.Description != "" {
+					updates["description"] = prop.Description
+				}
+				if prop.ImagePrompt != "" {
+					updates["image_prompt"] = prop.ImagePrompt
+				}
+				if prop.Category != "" {
+					updates["category"] = prop.Category
+				}
+				if err := s.propRepo.Update(ctx, existing.ID, updates); err != nil {
+					log.Warn().Err(err).
+						Str("prop_id", existing.ID).
+						Str("prop_name", existing.Name).
+						Msg("更新道具信息失败，继续处理")
+				}
+			} else {
+				// 道具不存在，创建新道具
+				prop.CreatedAt = time.Now()
+				prop.UpdatedAt = time.Now()
+				if err := s.propRepo.Create(ctx, prop); err != nil {
+					log.Warn().Err(err).
+						Str("prop_name", prop.Name).
+						Msg("创建道具失败，继续处理")
+				}
+			}
+		}
+
+		savePropsDuration := time.Since(savePropsStartTime)
+		log.Info().
+			Str("narration_id", narrationID).
+			Int("props_count", len(props)).
+			Dur("save_duration", savePropsDuration).
+			Msg("道具数据保存完成")
 	}
 
 	// 所有操作成功，更新状态为 completed
@@ -495,21 +613,21 @@ func (s *novelService) GenerateNarrationsForAllChapters(ctx context.Context, nov
 			// 创建 Narration 记录（作为本次解说生成的批次标识）
 			narrationID := id.New()
 			narrationEntity := &novel.Narration{
-				ID:         narrationID,
-				ChapterID:  chapter.ID,
-				WorkflowID: chapter.WorkflowID,
-				UserID:     chapter.UserID,
-				Prompt:     prompt,
-				Version:    nextVersion,
-				Status:     novel.TaskStatusCompleted,
+				ID:        narrationID,
+				ChapterID: chapter.ID,
+				NovelID:   chapter.NovelID,
+				UserID:    chapter.UserID,
+				Prompt:    prompt,
+				Version:   nextVersion,
+				Status:    novel.TaskStatusCompleted,
 			}
 			if err := s.narrationRepo.Create(ctx, narrationEntity); err != nil {
 				errCh <- fmt.Errorf("failed to create narration record for chapter %d: %w", chapter.Sequence, err)
 				return
 			}
 
-			// 步骤3: 将场景和镜头转换为实体并保存到独立的表中
-			scenes, shots, err := noveltools.ConvertToScenesAndShots(narrationID, chapter.ID, chapter.WorkflowID, chapter.UserID, nextVersion, jsonContent)
+			// 步骤3: 将场景、镜头、角色和道具转换为实体并保存到独立的表中
+			scenes, shots, characters, props, err := noveltools.ConvertToScenesAndShots(narrationID, chapter.ID, chapter.NovelID, chapter.UserID, nextVersion, jsonContent)
 			if err != nil {
 				errCh <- fmt.Errorf("failed to convert scenes and shots for chapter %d: %w", chapter.Sequence, err)
 				return
@@ -528,6 +646,64 @@ func (s *novelService) GenerateNarrationsForAllChapters(ctx context.Context, nov
 				if err := s.shotRepo.CreateMany(ctx, shots); err != nil {
 					errCh <- fmt.Errorf("failed to save shots for chapter %d: %w", chapter.Sequence, err)
 					return
+				}
+			}
+
+			// 保存角色（去重：如果角色已存在，则更新；否则创建）
+			for _, char := range characters {
+				existing, err := s.characterRepo.FindByNameAndNovelID(ctx, char.Name, chapter.NovelID)
+				if err == nil && existing != nil {
+					// 角色已存在，更新信息
+					updates := bson.M{}
+					if char.Gender != "" {
+						updates["gender"] = char.Gender
+					}
+					if char.AgeGroup != "" {
+						updates["age_group"] = char.AgeGroup
+					}
+					if char.RoleNumber != "" {
+						updates["role_number"] = char.RoleNumber
+					}
+					if char.Description != "" {
+						updates["description"] = char.Description
+					}
+					if char.ImagePrompt != "" {
+						updates["image_prompt"] = char.ImagePrompt
+					}
+					if len(updates) > 0 {
+						_ = s.characterRepo.Update(ctx, existing.ID, updates)
+					}
+				} else {
+					// 角色不存在，创建新角色
+					char.CreatedAt = time.Now()
+					char.UpdatedAt = time.Now()
+					_ = s.characterRepo.Create(ctx, char)
+				}
+			}
+
+			// 保存道具（去重：如果道具已存在，则更新；否则创建）
+			for _, prop := range props {
+				existing, err := s.propRepo.FindByName(ctx, chapter.NovelID, prop.Name)
+				if err == nil && existing != nil {
+					// 道具已存在，更新信息
+					updates := map[string]interface{}{}
+					if prop.Description != "" {
+						updates["description"] = prop.Description
+					}
+					if prop.ImagePrompt != "" {
+						updates["image_prompt"] = prop.ImagePrompt
+					}
+					if prop.Category != "" {
+						updates["category"] = prop.Category
+					}
+					if len(updates) > 0 {
+						_ = s.propRepo.Update(ctx, existing.ID, updates)
+					}
+				} else {
+					// 道具不存在，创建新道具
+					prop.CreatedAt = time.Now()
+					prop.UpdatedAt = time.Now()
+					_ = s.propRepo.Create(ctx, prop)
 				}
 			}
 		}(ch)
@@ -629,6 +805,110 @@ func (s *novelService) GetScenesByNarrationID(ctx context.Context, narrationID s
 
 func (s *novelService) GetShotsByNarrationID(ctx context.Context, narrationID string) ([]*novel.Shot, error) {
 	return s.shotRepo.FindByNarrationID(ctx, narrationID)
+}
+
+// UpdateShot 更新分镜头信息
+func (s *novelService) UpdateShot(ctx context.Context, shotID string, updates map[string]interface{}) error {
+	return s.shotRepo.Update(ctx, shotID, updates)
+}
+
+// RegenerateShotScript 重新生成单个分镜头的脚本（调用 LLM）
+func (s *novelService) RegenerateShotScript(ctx context.Context, shotID string) error {
+	// 1. 获取分镜头信息
+	shot, err := s.shotRepo.FindByID(ctx, shotID)
+	if err != nil {
+		return fmt.Errorf("find shot: %w", err)
+	}
+
+	// 2. 获取章节信息
+	chapter, err := s.chapterRepo.FindByID(ctx, shot.ChapterID)
+	if err != nil {
+		return fmt.Errorf("find chapter: %w", err)
+	}
+
+	// 3. 获取章节总数
+	totalChapters, err := s.getTotalChapters(ctx, chapter.NovelID)
+	if err != nil {
+		return fmt.Errorf("get total chapters: %w", err)
+	}
+
+	// 4. 构建简单的 prompt：基于分镜头的当前信息，要求 LLM 优化
+	prompt := fmt.Sprintf(`请优化以下分镜头的脚本信息：
+
+分镜头编号：%s
+当前解说：%s
+当前图片提示词：%s
+当前视频提示词：%s
+当前运镜方式：%s
+当前时长：%.1f秒
+
+请返回优化后的 JSON 格式，只包含以下字段：
+{
+  "narration": "优化后的解说内容",
+  "image_prompt": "优化后的图片提示词",
+  "video_prompt": "优化后的视频提示词",
+  "camera_movement": "优化后的运镜方式",
+  "duration": 优化后的时长（秒，数字）
+}
+
+要求：
+1. 只返回 JSON，不要其他文字
+2. 确保 JSON 格式正确，可以直接解析
+3. 优化后的内容应该更详细、更符合视频制作需求`,
+		shot.ShotNumber,
+		shot.Narration,
+		shot.ImagePrompt,
+		shot.VideoPrompt,
+		shot.CameraMovement,
+		shot.Duration,
+	)
+
+	// 5. 调用 LLM 生成优化后的脚本
+	generator := noveltools.NewNarrationGenerator(s.llmProvider)
+	_, optimizedText, err := generator.GenerateWithPrompt(ctx, prompt, chapter.Sequence, totalChapters, chapter.WordCount)
+	if err != nil {
+		return fmt.Errorf("generate optimized script: %w", err)
+	}
+
+	// 6. 解析 JSON（简单的解析，只提取需要的字段）
+	var result struct {
+		Narration      string  `json:"narration"`
+		ImagePrompt    string  `json:"image_prompt"`
+		VideoPrompt    string  `json:"video_prompt"`
+		CameraMovement string  `json:"camera_movement"`
+		Duration       float64 `json:"duration"`
+	}
+
+	cleanedText := noveltools.CleanJSONContent(optimizedText)
+	if err := json.Unmarshal([]byte(cleanedText), &result); err != nil {
+		return fmt.Errorf("parse optimized script: %w", err)
+	}
+
+	// 7. 更新分镜头信息
+	updates := map[string]interface{}{}
+	if result.Narration != "" {
+		updates["narration"] = result.Narration
+	}
+	if result.ImagePrompt != "" {
+		updates["image_prompt"] = result.ImagePrompt
+	}
+	if result.VideoPrompt != "" {
+		updates["video_prompt"] = result.VideoPrompt
+	}
+	if result.CameraMovement != "" {
+		updates["camera_movement"] = result.CameraMovement
+	}
+	if result.Duration > 0 {
+		updates["duration"] = result.Duration
+	}
+
+	if len(updates) > 0 {
+		if err := s.shotRepo.Update(ctx, shotID, updates); err != nil {
+			return fmt.Errorf("update shot: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // GetAudioVersions 获取章节解说的所有音频版本号

@@ -237,7 +237,7 @@ func (s *novelService) generateSingleSubtitle(
 	// 8. 构建章节字幕生成参数提示词
 	subtitlePrompt := fmt.Sprintf("字幕生成参数: maxLength=%d, format=ass, segmentCount=%d", maxLength, len(segmentTimestamps))
 
-	// 获取章节信息以获取 workflow_id
+	// 获取章节信息以获取 novel_id
 	chapter, err := s.chapterRepo.FindByID(ctx, narration.ChapterID)
 	if err != nil {
 		return "", fmt.Errorf("find chapter: %w", err)
@@ -246,11 +246,11 @@ func (s *novelService) generateSingleSubtitle(
 	// 9. 创建 chapter_subtitle 记录
 	subtitleID := id.New()
 	subtitleEntity := &novel.Subtitle{
-		ID:                 subtitleID,
-		ChapterID:          narration.ChapterID,
-		NarrationID:        narration.ID,
-		WorkflowID:         chapter.WorkflowID,
-		UserID:             narration.UserID,
+		ID:          subtitleID,
+		ChapterID:   narration.ChapterID,
+		NarrationID: narration.ID,
+		NovelID:     chapter.NovelID,
+		UserID:      narration.UserID,
 		Sequence:           sequence,
 		SubtitleResourceID: resourceID,
 		Format:             novel.SubtitleFormatASS,

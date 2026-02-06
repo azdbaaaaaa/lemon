@@ -506,19 +506,19 @@ func (s *novelService) generateMergedNarrationVideo(
 		videoPrompt = "图生视频（前3个场景合并）"
 	}
 
-	// 获取章节信息以获取 workflow_id
+	// 获取章节信息以获取 novel_id
 	chapter, err := s.chapterRepo.FindByID(ctx, chapterID)
 	if err != nil {
 		return "", fmt.Errorf("find chapter: %w", err)
 	}
 
 	videoEntity := &novel.Video{
-		ID:              videoID,
-		ChapterID:       chapterID,
-		NarrationID:     narration.ID,
-		WorkflowID:      chapter.WorkflowID,
-		UserID:          narration.UserID,
-		Sequence:        1, // 合并视频的 sequence 为 1
+		ID:          videoID,
+		ChapterID:  chapterID,
+		NarrationID: narration.ID,
+		NovelID:    chapter.NovelID,
+		UserID:     narration.UserID,
+		Sequence:   1, // 合并视频的 sequence 为 1
 		VideoResourceID: uploadResult.ResourceID,
 		Duration:        totalAudioDuration,
 		VideoType:       novel.VideoTypeNarration,
@@ -549,9 +549,10 @@ func (s *novelService) generateSingleNarrationVideo(
 	version int,
 	ffmpegClient *ffmpeg.Client,
 ) (string, error) {
-	// 1. 根据 scene_number 和 shot_number 查找图片
+	// 1. 优先使用分镜头的图片（Image 表）
 	image, err := s.imageRepo.FindBySceneAndShot(ctx, chapterID, shotInfo.SceneNumber, shotInfo.ShotNumber)
 	if err != nil {
+		// 如果分镜头图片不存在，尝试使用角色图片或场景图片（简化逻辑：先不实现，直接返回错误）
 		return "", fmt.Errorf("find image: %w", err)
 	}
 
@@ -618,35 +619,10 @@ func (s *novelService) generateSingleNarrationVideo(
 	imageBase64 := base64.StdEncoding.EncodeToString(imageData)
 	imageDataURL := fmt.Sprintf("data:image/jpeg;base64,%s", imageBase64)
 
-	// 4. 构建视频 prompt
-	// 如果 LLM 生成了 video_prompt，作为基础，然后结合解说内容和场景描述进行增强
-	// 如果没有 video_prompt，则完全基于图片 prompt 和场景描述构建
-	var videoPrompt string
-	if shotInfo.Shot.VideoPrompt != "" {
-		// 使用 LLM 生成的 video_prompt 作为基础，结合解说内容和场景描述进行增强
-		videoPrompt = enhanceVideoPrompt(
-			shotInfo.Shot.VideoPrompt,
-			image.Prompt,
-			shotInfo.Shot.ImagePrompt,
-			shotInfo.Shot.Narration,
-		)
-		log.Info().
-			Str("scene", shotInfo.SceneNumber).
-			Str("shot", shotInfo.ShotNumber).
-			Str("original_video_prompt", shotInfo.Shot.VideoPrompt).
-			Str("enhanced_video_prompt", videoPrompt).
-			Msg("使用增强后的 video_prompt（基于 LLM 生成 + 解说内容 + 场景描述）")
-	} else {
-		// 如果没有 video_prompt，基于图片 prompt 和场景描述构建
-		videoPrompt = buildVideoPromptFromImage(image.Prompt, shotInfo.Shot.ImagePrompt, shotInfo.Shot.Narration)
-		if videoPrompt == "" {
-			videoPrompt = "画面有明显的动态效果，镜头缓慢推进，人物有自然的动作和表情变化，背景有轻微的运动感，整体画面流畅自然"
-		}
-		log.Info().
-			Str("scene", shotInfo.SceneNumber).
-			Str("shot", shotInfo.ShotNumber).
-			Str("video_prompt", videoPrompt).
-			Msg("使用构建的 video_prompt")
+	// 4. 构建视频 prompt（简化逻辑：直接使用 shot 的 video_prompt，如果没有则使用默认值）
+	videoPrompt := shotInfo.Shot.VideoPrompt
+	if videoPrompt == "" {
+		videoPrompt = "画面有明显的动态效果，镜头缓慢推进，人物有自然的动作和表情变化，背景有轻微的运动感，整体画面流畅自然"
 	}
 
 	// 5. 从图片创建视频
@@ -879,19 +855,19 @@ func (s *novelService) generateSingleNarrationVideo(
 
 	// videoPrompt 已经在前面（第 571 行）构建好了，这里直接使用
 
-	// 获取章节信息以获取 workflow_id
+	// 获取章节信息以获取 novel_id
 	chapter, err := s.chapterRepo.FindByID(ctx, chapterID)
 	if err != nil {
 		return "", fmt.Errorf("find chapter: %w", err)
 	}
 
 	videoEntity := &novel.Video{
-		ID:              videoID,
-		ChapterID:       chapterID,
-		NarrationID:     narration.ID,
-		WorkflowID:      chapter.WorkflowID,
-		UserID:          narration.UserID,
-		Sequence:        sequence,
+		ID:          videoID,
+		ChapterID:  chapterID,
+		NarrationID: narration.ID,
+		NovelID:    chapter.NovelID,
+		UserID:     narration.UserID,
+		Sequence:   sequence,
 		VideoResourceID: uploadResult.ResourceID,
 		Duration:        audioDuration,
 		VideoType:       novel.VideoTypeNarration,
@@ -1286,10 +1262,10 @@ func (s *novelService) generateFinalVideoForChapter(ctx context.Context, chapter
 	// 使用与 narration 视频相同的版本号（已在前面获取）
 	videoID := id.New()
 	videoEntity := &novel.Video{
-		ID:              videoID,
-		ChapterID:       chapterID,
-		WorkflowID:      chapter.WorkflowID,
-		UserID:          chapter.UserID,
+		ID:        videoID,
+		ChapterID: chapterID,
+		NovelID:   chapter.NovelID,
+		UserID:    chapter.UserID,
 		Sequence:        1,
 		VideoResourceID: uploadResult.ResourceID,
 		Duration:        totalDuration,

@@ -14,12 +14,12 @@ import (
 type Prop struct {
 	ID string `bson:"id" json:"id"` // 道具ID（UUID）
 
-	NovelID    string `bson:"novel_id" json:"novel_id"`     // 关联的小说ID
-	WorkflowID string `bson:"workflow_id" json:"workflow_id"` // 关联的工作流ID
-	Name       string `bson:"name" json:"name"`              // 道具名称
+	NovelID string `bson:"novel_id" json:"novel_id"` // 关联的小说ID
+	Name    string `bson:"name" json:"name"`         // 道具名称
 
-	Description string `bson:"description" json:"description"` // 道具详细描述
-	ImagePrompt  string `bson:"image_prompt" json:"image_prompt"` // 道具图片提示词
+	Description     string `bson:"description" json:"description"`           // 道具详细描述
+	ImagePrompt     string `bson:"image_prompt" json:"image_prompt"`          // 道具图片提示词
+	ImageResourceID string `bson:"image_resource_id,omitempty" json:"image_resource_id,omitempty"` // 道具图片的 resource_id
 
 	Category string `bson:"category,omitempty" json:"category,omitempty"` // 道具类别（如：武器、法器、丹药等）
 
@@ -40,10 +40,6 @@ func (p *Prop) EnsureIndexes(ctx context.Context, db *mongo.Database) error {
 		{
 			Keys:    bson.D{{Key: "novel_id", Value: 1}},
 			Options: options.Index().SetName("idx_novel_id"),
-		},
-		{
-			Keys:    bson.D{{Key: "workflow_id", Value: 1}},
-			Options: options.Index().SetName("idx_workflow_id"),
 		},
 		{
 			Keys:    bson.D{{Key: "novel_id", Value: 1}, {Key: "name", Value: 1}},

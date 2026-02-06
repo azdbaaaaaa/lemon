@@ -16,7 +16,7 @@ import (
 // 定义小说和章节相关的能力
 type ChapterService interface {
 	// CreateNovelFromResource 根据资源ID创建小说
-	CreateNovelFromResource(ctx context.Context, resourceID, userID, workflowID string) (string, error)
+	CreateNovelFromResource(ctx context.Context, resourceID, userID string, narrationType novel.NarrationType, style novel.NovelStyle) (string, error)
 
 	// SplitNovelIntoChapters 根据小说内容切分章节
 	SplitNovelIntoChapters(ctx context.Context, novelID string, targetChapters int) error
@@ -30,7 +30,7 @@ type ChapterService interface {
 
 // CreateNovelFromResource 第一步：根据资源ID获取小说内容，然后创建小说
 // 返回创建的小说ID
-func (s *novelService) CreateNovelFromResource(ctx context.Context, resourceID, userID, workflowID string) (string, error) {
+func (s *novelService) CreateNovelFromResource(ctx context.Context, resourceID, userID string, narrationType novel.NarrationType, style novel.NovelStyle) (string, error) {
 	// 使用 ResourceService 获取资源信息（系统内部请求，userID 为空）
 	resResult, err := s.resourceService.GetResource(ctx, &service.GetResourceRequest{
 		ResourceID: resourceID,
@@ -65,13 +65,14 @@ func (s *novelService) CreateNovelFromResource(ctx context.Context, resourceID, 
 
 	novelID := id.New()
 	novelEntity := &novel.Novel{
-		ID:          novelID,
-		ResourceID:  resourceID,
-		UserID:      userID,
-		WorkflowID:  workflowID,
-		Title:       title,
-		Author:      author,
-		Description: description,
+		ID:            novelID,
+		ResourceID:    resourceID,
+		UserID:        userID,
+		Title:         title,
+		Author:        author,
+		Description:   description,
+		NarrationType: narrationType,
+		Style:         style,
 	}
 
 	if err := s.novelRepo.Create(ctx, novelEntity); err != nil {
@@ -132,10 +133,9 @@ func (s *novelService) SplitNovelIntoChapters(ctx context.Context, novelID strin
 		lineCount := len(strings.Split(strings.TrimSpace(seg.Text), "\n"))
 
 		chapterEntity := &novel.Chapter{
-			ID:          chapterID,
-			NovelID:     novelID,
-			WorkflowID:  novelEntity.WorkflowID,
-			UserID:      novelEntity.UserID,
+			ID:      chapterID,
+			NovelID: novelID,
+			UserID:  novelEntity.UserID,
 			Sequence:    i + 1,
 			Title:       seg.Title,
 			ChapterText: seg.Text,
