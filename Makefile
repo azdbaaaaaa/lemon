@@ -28,7 +28,7 @@ tools:
 	@echo "Installing development tools..."
 	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 	go install golang.org/x/tools/cmd/goimports@latest
-	go install github.com/cosmtrek/air@latest
+	go install github.com/swaggo/swag/cmd/swag@latest
 	@echo "Done!"
 
 # ==================== 构建 ====================
@@ -152,7 +152,7 @@ help:
 	@echo ""
 	@echo "Dependency Management:"
 	@echo "  deps          Download and tidy dependencies"
-	@echo "  tools         Install development tools (golangci-lint, goimports, air)"
+	@echo "  tools         Install development tools (golangci-lint, goimports, swag)"
 	@echo ""
 	@echo "Build:"
 	@echo "  build         Build the application"
