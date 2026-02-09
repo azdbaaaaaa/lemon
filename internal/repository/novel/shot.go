@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/rs/zerolog/log"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -17,15 +18,13 @@ type ShotRepository interface {
 	CreateMany(ctx context.Context, shots []*novel.Shot) error
 	FindByID(ctx context.Context, id string) (*novel.Shot, error)
 	FindBySceneID(ctx context.Context, sceneID string) ([]*novel.Shot, error)
-	FindByNarrationID(ctx context.Context, narrationID string) ([]*novel.Shot, error)
-	FindByNarrationIDAndVersion(ctx context.Context, narrationID string, version int) ([]*novel.Shot, error)
 	FindByChapterID(ctx context.Context, chapterID string) ([]*novel.Shot, error)
-	FindByChapterIDAndSceneAndShot(ctx context.Context, chapterID, sceneNumber, shotNumber string) (*novel.Shot, error)
+	FindByChapterIDAndVersion(ctx context.Context, chapterID string, version int) ([]*novel.Shot, error)
 	Update(ctx context.Context, id string, updates map[string]interface{}) error
 	UpdateStatus(ctx context.Context, id string, status novel.TaskStatus, errorMessage string) error
 	Delete(ctx context.Context, id string) error
 	DeleteBySceneID(ctx context.Context, sceneID string) error
-	DeleteByNarrationID(ctx context.Context, narrationID string) error
+	DeleteByNovelID(ctx context.Context, novelID string) error
 }
 
 // ShotRepo 镜头仓库实现
@@ -47,9 +46,6 @@ func (r *ShotRepo) Create(ctx context.Context, shot *novel.Shot) error {
 	if shot.Status == "" || shot.Status == novel.TaskStatus("") {
 		shot.Status = novel.TaskStatusCompleted
 	}
-	if shot.Version == 0 {
-		shot.Version = 1
-	}
 	_, err := r.coll.InsertOne(ctx, shot)
 	return err
 }
@@ -65,10 +61,7 @@ func (r *ShotRepo) CreateMany(ctx context.Context, shots []*novel.Shot) error {
 		shot.CreatedAt = now
 		shot.UpdatedAt = now
 		if shot.Status == "" {
-			shot.Status = "completed"
-		}
-		if shot.Version == 0 {
-			shot.Version = 1
+			shot.Status = novel.TaskStatusCompleted
 		}
 		docs[i] = shot
 	}
@@ -102,70 +95,55 @@ func (r *ShotRepo) FindBySceneID(ctx context.Context, sceneID string) ([]*novel.
 	return shots, nil
 }
 
-// FindByNarrationID 根据解说ID查询所有镜头（按index排序）
-func (r *ShotRepo) FindByNarrationID(ctx context.Context, narrationID string) ([]*novel.Shot, error) {
-	filter := bson.M{"narration_id": narrationID, "deleted_at": nil}
-	opts := options.Find().SetSort(bson.M{"index": 1})
-	cur, err := r.coll.Find(ctx, filter, opts)
-	if err != nil {
-		return nil, err
-	}
-	defer cur.Close(ctx)
-
-	var shots []*novel.Shot
-	if err := cur.All(ctx, &shots); err != nil {
-		return nil, err
-	}
-	return shots, nil
-}
-
-// FindByNarrationIDAndVersion 根据解说ID和版本号查询镜头
-func (r *ShotRepo) FindByNarrationIDAndVersion(ctx context.Context, narrationID string, version int) ([]*novel.Shot, error) {
-	filter := bson.M{"narration_id": narrationID, "version": version, "deleted_at": nil}
-	opts := options.Find().SetSort(bson.M{"index": 1})
-	cur, err := r.coll.Find(ctx, filter, opts)
-	if err != nil {
-		return nil, err
-	}
-	defer cur.Close(ctx)
-
-	var shots []*novel.Shot
-	if err := cur.All(ctx, &shots); err != nil {
-		return nil, err
-	}
-	return shots, nil
-}
-
-// FindByChapterID 根据章节ID查询所有镜头
+// FindByChapterID 根据章节ID查询所有镜头（查询所有版本）
 func (r *ShotRepo) FindByChapterID(ctx context.Context, chapterID string) ([]*novel.Shot, error) {
 	filter := bson.M{"chapter_id": chapterID, "deleted_at": nil}
-	opts := options.Find().SetSort(bson.M{"index": 1})
+	opts := options.Find().SetSort(bson.D{
+		{Key: "version", Value: -1},
+		{Key: "sequence", Value: 1},
+	})
 	cur, err := r.coll.Find(ctx, filter, opts)
 	if err != nil {
+		log.Error().Err(err).
+			Str("chapter_id", chapterID).
+			Msg("查询镜头列表失败")
 		return nil, err
 	}
 	defer cur.Close(ctx)
 
 	var shots []*novel.Shot
 	if err := cur.All(ctx, &shots); err != nil {
+		log.Error().Err(err).
+			Str("chapter_id", chapterID).
+			Msg("解析镜头列表失败")
 		return nil, err
 	}
 	return shots, nil
 }
 
-// FindByChapterIDAndSceneAndShot 根据章节ID、场景编号和镜头编号查询镜头
-func (r *ShotRepo) FindByChapterIDAndSceneAndShot(ctx context.Context, chapterID, sceneNumber, shotNumber string) (*novel.Shot, error) {
-	var shot novel.Shot
-	filter := bson.M{
-		"chapter_id":  chapterID,
-		"scene_number": sceneNumber,
-		"shot_number":  shotNumber,
-		"deleted_at":   nil,
-	}
-	if err := r.coll.FindOne(ctx, filter).Decode(&shot); err != nil {
+// FindByChapterIDAndVersion 根据章节ID和版本号查询镜头
+func (r *ShotRepo) FindByChapterIDAndVersion(ctx context.Context, chapterID string, version int) ([]*novel.Shot, error) {
+	filter := bson.M{"chapter_id": chapterID, "version": version, "deleted_at": nil}
+	opts := options.Find().SetSort(bson.M{"sequence": 1})
+	cur, err := r.coll.Find(ctx, filter, opts)
+	if err != nil {
+		log.Error().Err(err).
+			Str("chapter_id", chapterID).
+			Int("version", version).
+			Msg("按版本查询镜头列表失败")
 		return nil, err
 	}
-	return &shot, nil
+	defer cur.Close(ctx)
+
+	var shots []*novel.Shot
+	if err := cur.All(ctx, &shots); err != nil {
+		log.Error().Err(err).
+			Str("chapter_id", chapterID).
+			Int("version", version).
+			Msg("解析镜头列表失败")
+		return nil, err
+	}
+	return shots, nil
 }
 
 // Update 更新镜头
@@ -211,11 +189,11 @@ func (r *ShotRepo) Delete(ctx context.Context, id string) error {
 	return err
 }
 
-// DeleteBySceneID 根据场景ID软删除所有镜头
-func (r *ShotRepo) DeleteBySceneID(ctx context.Context, sceneID string) error {
+// DeleteByNovelID 根据小说ID删除所有镜头（软删除）
+func (r *ShotRepo) DeleteByNovelID(ctx context.Context, novelID string) error {
 	_, err := r.coll.UpdateMany(
 		ctx,
-		bson.M{"scene_id": sceneID, "deleted_at": nil},
+		bson.M{"novel_id": novelID, "deleted_at": nil},
 		bson.M{"$set": bson.M{
 			"deleted_at": time.Now(),
 			"updated_at": time.Now(),
@@ -224,11 +202,11 @@ func (r *ShotRepo) DeleteBySceneID(ctx context.Context, sceneID string) error {
 	return err
 }
 
-// DeleteByNarrationID 根据解说ID软删除所有镜头
-func (r *ShotRepo) DeleteByNarrationID(ctx context.Context, narrationID string) error {
+// DeleteBySceneID 根据场景ID软删除所有镜头
+func (r *ShotRepo) DeleteBySceneID(ctx context.Context, sceneID string) error {
 	_, err := r.coll.UpdateMany(
 		ctx,
-		bson.M{"narration_id": narrationID, "deleted_at": nil},
+		bson.M{"scene_id": sceneID, "deleted_at": nil},
 		bson.M{"$set": bson.M{
 			"deleted_at": time.Now(),
 			"updated_at": time.Now(),

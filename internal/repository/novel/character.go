@@ -9,6 +9,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"lemon/internal/model/novel"
+	novelmodel "lemon/internal/model/novel"
 )
 
 // CharacterRepository 角色仓库接口（供 service 层依赖）
@@ -18,8 +19,9 @@ type CharacterRepository interface {
 	FindByNovelID(ctx context.Context, novelID string) ([]*novel.Character, error)
 	FindByNameAndNovelID(ctx context.Context, name, novelID string) (*novel.Character, error)
 	Update(ctx context.Context, id string, updates bson.M) error
-	UpdateStatus(ctx context.Context, id string, status novel.TaskStatus, errorMessage string) error
+	UpdateStatus(ctx context.Context, id string, status novelmodel.TaskStatus, errorMessage string) error
 	Delete(ctx context.Context, id string) error
+	DeleteByNovelID(ctx context.Context, novelID string) error
 }
 
 // CharacterRepo 角色仓库
@@ -90,22 +92,38 @@ func (r *CharacterRepo) Update(ctx context.Context, id string, updates bson.M) e
 }
 
 // UpdateStatus 更新角色状态
-func (r *CharacterRepo) UpdateStatus(ctx context.Context, id string, status novel.TaskStatus, errorMessage string) error {
-	update := bson.M{
-		"status":     status,
-		"updated_at": time.Now(),
-	}
+func (r *CharacterRepo) UpdateStatus(ctx context.Context, id string, status novelmodel.TaskStatus, errorMessage string) error {
 	if errorMessage != "" {
-		update["error_message"] = errorMessage
+		// 设置 error_message
+		_, err := r.coll.UpdateOne(
+			ctx,
+			bson.M{"id": id},
+			bson.M{
+				"$set": bson.M{
+					"status":        status,
+					"updated_at":    time.Now(),
+					"error_message": errorMessage,
+				},
+			},
+		)
+		return err
 	} else {
-		update["$unset"] = bson.M{"error_message": ""}
+		// 清除 error_message
+		_, err := r.coll.UpdateOne(
+			ctx,
+			bson.M{"id": id},
+			bson.M{
+				"$set": bson.M{
+					"status":     status,
+					"updated_at": time.Now(),
+				},
+				"$unset": bson.M{
+					"error_message": "",
+				},
+			},
+		)
+		return err
 	}
-	_, err := r.coll.UpdateOne(
-		ctx,
-		bson.M{"id": id},
-		bson.M{"$set": update},
-	)
-	return err
 }
 
 // Delete 软删除角色
@@ -113,6 +131,19 @@ func (r *CharacterRepo) Delete(ctx context.Context, id string) error {
 	_, err := r.coll.UpdateOne(
 		ctx,
 		bson.M{"id": id},
+		bson.M{"$set": bson.M{
+			"deleted_at": time.Now(),
+			"updated_at": time.Now(),
+		}},
+	)
+	return err
+}
+
+// DeleteByNovelID 根据小说ID删除所有角色（软删除）
+func (r *CharacterRepo) DeleteByNovelID(ctx context.Context, novelID string) error {
+	_, err := r.coll.UpdateMany(
+		ctx,
+		bson.M{"novel_id": novelID, "deleted_at": nil},
 		bson.M{"$set": bson.M{
 			"deleted_at": time.Now(),
 			"updated_at": time.Now(),

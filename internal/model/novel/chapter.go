@@ -12,21 +12,27 @@ import (
 // Chapter 章节实体
 // 说明：章节以 UUID 为主键，关联 novel_id；解说内容由 Narration/Scene/Shot 等表单独存储。
 type Chapter struct {
+	// 基础标识
 	ID string `bson:"id" json:"id"` // 章节ID（UUID）
 
-	NovelID string `bson:"novel_id" json:"novel_id"`
-	UserID  string `bson:"user_id" json:"user_id"`
+	// 关联字段
+	NovelID string `bson:"novel_id" json:"novel_id"` // 关联的小说ID
+	UserID  string `bson:"user_id" json:"user_id"`   // 用户ID
 
+	// 基本信息
 	Sequence int    `bson:"sequence" json:"sequence"` // 章节序号，从1开始
-	Title    string `bson:"title" json:"title"`
+	Title    string `bson:"title" json:"title"`       // 章节标题
 
+	// 内容信息
 	ChapterText string `bson:"chapter_text" json:"chapter_text"` // 章节全文
 
-	// 章节统计信息
-	TotalChars int `bson:"total_chars" json:"total_chars"` // 章节总字符数（中文字符，包括标点）
-	WordCount  int `bson:"word_count" json:"word_count"`   // 章节总字数（仅中文字符，不包括标点）
-	LineCount  int `bson:"line_count" json:"line_count"`   // 章节行数
+	// 统计信息
+	WordCount int `bson:"word_count" json:"word_count"` // 章节字数
 
+	// 版本管理
+	ActiveSceneVersion int `bson:"active_scene_version,omitempty" json:"active_scene_version,omitempty"` // 当前生效的场景版本号（从1开始，0表示未设置）
+
+	// 时间戳
 	CreatedAt time.Time  `bson:"created_at" json:"created_at"`
 	UpdatedAt time.Time  `bson:"updated_at" json:"updated_at"`
 	DeletedAt *time.Time `bson:"deleted_at,omitempty" json:"deleted_at,omitempty"`

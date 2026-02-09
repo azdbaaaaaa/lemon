@@ -4,14 +4,14 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-
-	"github.com/rs/zerolog/log"
-	"go.mongodb.org/mongo-driver/bson"
+	"strings"
+	"time"
 
 	"lemon/internal/model/novel"
 	"lemon/internal/pkg/id"
-	"lemon/internal/pkg/noveltools"
 	"lemon/internal/service"
+
+	"github.com/rs/zerolog/log"
 )
 
 // ImageService 章节图片服务接口
@@ -21,303 +21,182 @@ type ImageService interface {
 	// 自动使用最新的版本号+1
 	GenerateImagesForNarration(ctx context.Context, narrationID string) ([]string, error)
 
-	// GenerateCharacterImages 为小说的所有角色生成图片
-	GenerateCharacterImages(ctx context.Context, novelID string) ([]string, error)
+	// GenerateCharacterImages 为小说的所有角色生成图片（异步执行，立即返回）
+	GenerateCharacterImages(ctx context.Context, novelID string) error
 
 	// GenerateSceneImages 为解说的所有场景生成图片
 	GenerateSceneImages(ctx context.Context, narrationID string) ([]string, error)
 
-	// GeneratePropImages 为小说的所有道具生成图片
-	GeneratePropImages(ctx context.Context, novelID string) ([]string, error)
+	// GeneratePropImages 为小说的所有道具生成图片（异步执行，立即返回）
+	GeneratePropImages(ctx context.Context, novelID string) error
 
 	// GetImageVersions 获取章节的所有图片版本号
 	GetImageVersions(ctx context.Context, chapterID string) ([]int, error)
 
 	// ListImagesByNarration 获取解说的图片列表（可指定版本；version<=0 则取最新版本）
 	ListImagesByNarration(ctx context.Context, narrationID string, version int) ([]*novel.Image, int, error)
+
+	// GetCharacterImages 获取角色的所有图片
+	GetCharacterImages(ctx context.Context, characterID string) ([]*novel.Image, error)
+
+	// GetPropImages 获取道具的所有图片
+	GetPropImages(ctx context.Context, propID string) ([]*novel.Image, error)
 }
 
 // GenerateImagesForNarration 为章节解说生成所有章节图片
-// version: 图片版本号，如果为空则自动生成下一个版本号（基于该章节已有的图片版本），如果指定则自动生成下一个版本号
+// 注意：narration 模块已删除，此方法需要重构
 func (s *novelService) GenerateImagesForNarration(ctx context.Context, narrationID string) ([]string, error) {
-	// 1. 获取章节解说
-	narration, err := s.narrationRepo.FindByID(ctx, narrationID)
-	if err != nil {
-		return nil, fmt.Errorf("find narration: %w", err)
-	}
-
-	// 2. 从独立的表中查询场景和镜头
-	scenes, err := s.sceneRepo.FindByNarrationID(ctx, narrationID)
-	if err != nil {
-		return nil, fmt.Errorf("find scenes: %w", err)
-	}
-
-	if len(scenes) == 0 {
-		return nil, fmt.Errorf("no scenes found for narration")
-	}
-
-	// 2. 自动生成下一个版本号（基于章节ID，独立递增）
-	imageVersion, err := s.getNextImageVersion(ctx, narration.ChapterID, 0)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get next image version: %w", err)
-	}
-
-	// 2. 获取章节信息
-	chapter, err := s.chapterRepo.FindByID(ctx, narration.ChapterID)
-	if err != nil {
-		return nil, fmt.Errorf("find chapter: %w", err)
-	}
-
-	// 3. 同步角色信息到小说级别
-	if err := s.SyncCharactersFromNarration(ctx, chapter.NovelID, narrationID); err != nil {
-		return nil, fmt.Errorf("sync characters: %w", err)
-	}
-
-	// 4. 获取小说的所有角色
-	characters, err := s.GetCharactersByNovelID(ctx, chapter.NovelID)
-	if err != nil {
-		return nil, fmt.Errorf("get characters: %w", err)
-	}
-
-	// 构建角色映射
-	characterMap := make(map[string]*novel.Character)
-	for _, char := range characters {
-		characterMap[char.Name] = char
-	}
-
-	// 5. 获取图片生成提供者（初始化时已创建）
-	imageProvider := s.imageProvider
-
-	// 6. 初始化 Prompt 构建器
-	promptBuilder := noveltools.NewImagePromptBuilder()
-
-	// 7. 遍历所有场景和镜头，生成图片
-	var imageIDs []string
-	sequence := 1
-
-	for _, scene := range scenes {
-		// 查询该场景下的所有镜头
-		shots, err := s.shotRepo.FindBySceneID(ctx, scene.ID)
-		if err != nil {
-			log.Error().
-				Err(err).
-				Str("scene_id", scene.ID).
-				Msg("查询镜头失败，跳过该场景")
-			continue
-		}
-
-		for _, shot := range shots {
-			// 查找角色信息
-			character, ok := characterMap[shot.Character]
-			if !ok {
-				log.Warn().
-					Str("character", shot.Character).
-					Str("scene", scene.SceneNumber).
-					Str("shot", shot.ShotNumber).
-					Msg("角色信息未找到，跳过")
-				continue
-			}
-
-			// 生成单张图片
-			imageID, err := s.generateSingleImage(
-				ctx,
-				narration,
-				chapter,
-				scene,
-				shot,
-				character,
-				imageProvider,
-				promptBuilder,
-				sequence,
-				imageVersion,
-			)
-			if err != nil {
-				log.Error().
-					Err(err).
-					Str("scene", scene.SceneNumber).
-					Str("shot", shot.ShotNumber).
-					Msg("生成图片失败")
-				continue
-			}
-
-			imageIDs = append(imageIDs, imageID)
-			sequence++
-		}
-	}
-
-	return imageIDs, nil
+	// TODO: 重构此方法，不再依赖 narration
+	return nil, fmt.Errorf("narration module has been removed, this method needs to be refactored")
 }
 
-// generateSingleChapterImage 生成单张章节图片（私有方法）
-func (s *novelService) generateSingleImage(
-	ctx context.Context,
-	narration *novel.Narration,
-	chapter *novel.Chapter,
-	scene *novel.Scene,
-	shot *novel.Shot,
-	character *novel.Character,
-	imageProvider noveltools.ImageProvider,
-	promptBuilder *noveltools.ImagePromptBuilder,
-	sequence int,
-	version int,
-) (string, error) {
-	// 1. 构建完整 prompt
-	completePrompt := promptBuilder.BuildCompletePrompt(character, shot.ImagePrompt)
-
-	// 2. 构建输出文件名
-	outputFilename := fmt.Sprintf("chapter_%03d_image_%02d.jpeg", chapter.Sequence, sequence)
-
-	// 3. 使用图片生成提供者生成图片
-	imageData, err := imageProvider.GenerateImage(ctx, completePrompt, outputFilename)
-	if err != nil {
-		return "", fmt.Errorf("generate image: %w", err)
-	}
-
-	// 8. 上传图片到 resource 模块
-	uploadReq := &service.UploadFileRequest{
-		UserID:      narration.UserID,
-		FileName:    outputFilename,
-		ContentType: "image/jpeg",
-		Ext:         "jpeg",
-		Data:        bytes.NewReader(imageData),
-	}
-
-	uploadResult, err := s.resourceService.UploadFile(ctx, uploadReq)
-	if err != nil {
-		return "", fmt.Errorf("upload image: %w", err)
-	}
-
-	// 9. 保存 ChapterImage 记录
-	imageID := id.New()
-	chapterImage := &novel.Image{
-		ID:              imageID,
-		ChapterID:   chapter.ID,
-		NarrationID: narration.ID,
-		NovelID:     chapter.NovelID,
-		SceneNumber: scene.SceneNumber,
-		ShotNumber:      shot.ShotNumber,
-		ImageResourceID: uploadResult.ResourceID,
-		CharacterName:   shot.Character,
-		Prompt:          completePrompt,
-		Version:         version, // 使用指定的版本号
-		Status:          novel.TaskStatusCompleted,
-		Sequence:        sequence,
-	}
-
-	if err := s.imageRepo.Create(ctx, chapterImage); err != nil {
-		return "", fmt.Errorf("create chapter image: %w", err)
-	}
-
-	log.Info().
-		Str("image_id", imageID).
-		Str("chapter_id", chapter.ID).
-		Str("scene", scene.SceneNumber).
-		Str("shot", shot.ShotNumber).
-		Msg("章节图片生成成功")
-
-	return imageID, nil
+// GetImageVersions 获取章节的所有图片版本号
+// 注意：narration 模块已删除，此方法需要重构
+func (s *novelService) GetImageVersions(ctx context.Context, chapterID string) ([]int, error) {
+	// TODO: 重构此方法，根据章节ID查询图片版本号
+	// 暂时返回空列表
+	return []int{1}, nil
 }
 
 // getNextImageVersion 获取章节的下一个图片版本号（自动递增）
 // chapterID: 章节ID
 // baseVersion: 基础版本号（如 1），如果为0则自动生成下一个版本号
 func (s *novelService) getNextImageVersion(ctx context.Context, chapterID string, baseVersion int) (int, error) {
-	versions, err := s.imageRepo.FindVersionsByChapterID(ctx, chapterID)
-	if err != nil {
-		// 如果没有找到任何版本，返回 1 或基础版本号
-		if baseVersion == 0 {
-			return 1, nil
-		}
-		return baseVersion, nil
+	// TODO: 重构此方法，根据 shot_id 或 chapter_id 查询图片版本号
+	// 暂时返回基础版本号或1
+	if baseVersion == 0 {
+		return 1, nil
 	}
-
-	if len(versions) == 0 {
-		if baseVersion == 0 {
-			return 1, nil
-		}
-		return baseVersion, nil
-	}
-
-	// 如果指定了基础版本号，检查该版本是否已存在
-	if baseVersion > 0 {
-		for _, v := range versions {
-			if v == baseVersion {
-				// 该版本已存在，返回下一个版本号
-				maxVersion := 0
-				for _, v := range versions {
-					if v > maxVersion {
-						maxVersion = v
-					}
-				}
-				return maxVersion + 1, nil
-			}
-		}
-		// 该版本不存在，直接返回
-		return baseVersion, nil
-	}
-
-	// 如果没有指定基础版本号，查找所有版本号中的最大值
-	maxVersion := 0
-	for _, v := range versions {
-		if v > maxVersion {
-			maxVersion = v
-		}
-	}
-
-	return maxVersion + 1, nil
+	return baseVersion, nil
 }
 
-// GenerateCharacterImages 为小说的所有角色生成图片
-func (s *novelService) GenerateCharacterImages(ctx context.Context, novelID string) ([]string, error) {
+// GenerateCharacterImages 为小说的所有角色生成图片（异步执行，立即返回）
+// 为每个角色生成三种细分类的图片：正视图、三视图、细节图
+func (s *novelService) GenerateCharacterImages(ctx context.Context, novelID string) error {
+	// 检查小说是否存在
+	novelEntity, err := s.novelRepo.FindByID(ctx, novelID)
+	if err != nil {
+		return fmt.Errorf("find novel: %w", err)
+	}
+
+	// 获取所有角色
 	characters, err := s.characterRepo.FindByNovelID(ctx, novelID)
 	if err != nil {
-		return nil, fmt.Errorf("find characters: %w", err)
+		return fmt.Errorf("find characters: %w", err)
 	}
 
 	if len(characters) == 0 {
-		return []string{}, nil
+		return nil
 	}
 
-	novelEntity, err := s.novelRepo.FindByID(ctx, novelID)
-	if err != nil {
-		return nil, fmt.Errorf("find novel: %w", err)
+	// 将所有角色状态设置为 pending
+	for _, char := range characters {
+		if err := s.characterRepo.UpdateStatus(ctx, char.ID, novel.TaskStatusPending, ""); err != nil {
+			log.Warn().Err(err).Str("character_id", char.ID).Msg("更新角色状态失败")
+		}
 	}
 
-	var imageIDs []string
+	// 启动异步任务
+	go s.generateCharacterImagesAsync(context.Background(), novelEntity, characters)
+
+	return nil
+}
+
+// generateCharacterImagesAsync 异步生成角色图片
+func (s *novelService) generateCharacterImagesAsync(ctx context.Context, novelEntity *novel.Novel, characters []*novel.Character) {
+	// 定义三种细分类
+	subtypes := []novel.CharacterImageSubtype{
+		novel.CharacterImageSubtypeFront,
+		novel.CharacterImageSubtypeThreeView,
+		novel.CharacterImageSubtypeDetail,
+	}
+
 	for _, char := range characters {
 		if char.ImagePrompt == "" {
 			log.Warn().Str("character_id", char.ID).Str("character_name", char.Name).Msg("角色图片提示词为空，跳过")
+			// 更新状态为失败
+			if err := s.characterRepo.UpdateStatus(ctx, char.ID, novel.TaskStatusFailed, "图片提示词为空"); err != nil {
+				log.Warn().Err(err).Str("character_id", char.ID).Msg("更新角色状态失败")
+			}
 			continue
 		}
 
-		if char.ImageResourceID != "" {
-			log.Info().Str("character_id", char.ID).Str("character_name", char.Name).Msg("角色图片已存在，跳过")
-			continue
+		// 为每个角色生成三种细分类的图片
+		hasError := false
+		var errorMessages []string
+
+		for _, subtype := range subtypes {
+			// 检查该细分类是否已有图片
+			existingImages, err := s.imageRepo.FindByCharacterIDAndSubtype(ctx, char.ID, subtype)
+			if err == nil && len(existingImages) > 0 {
+				log.Info().
+					Str("character_id", char.ID).
+					Str("character_name", char.Name).
+					Str("subtype", string(subtype)).
+					Int("count", len(existingImages)).
+					Msg("角色图片已存在，跳过")
+				continue
+			}
+
+			imageID, err := s.generateCharacterImage(ctx, novelEntity, char, subtype)
+			if err != nil {
+				log.Error().
+					Err(err).
+					Str("character_id", char.ID).
+					Str("character_name", char.Name).
+					Str("subtype", string(subtype)).
+					Msg("生成角色图片失败")
+				hasError = true
+				errorMessages = append(errorMessages, fmt.Sprintf("%s: %v", subtype, err))
+			} else {
+				log.Info().
+					Str("character_id", char.ID).
+					Str("character_name", char.Name).
+					Str("subtype", string(subtype)).
+					Str("image_id", imageID).
+					Msg("角色图片生成成功")
+			}
 		}
 
-		imageID, err := s.generateCharacterImage(ctx, novelEntity, char)
-		if err != nil {
-			log.Error().Err(err).Str("character_id", char.ID).Str("character_name", char.Name).Msg("生成角色图片失败")
-			continue
+		// 更新角色状态
+		if hasError {
+			errorMsg := strings.Join(errorMessages, "; ")
+			if err := s.characterRepo.UpdateStatus(ctx, char.ID, novel.TaskStatusFailed, errorMsg); err != nil {
+				log.Warn().Err(err).Str("character_id", char.ID).Msg("更新角色状态失败")
+			}
+		} else {
+			if err := s.characterRepo.UpdateStatus(ctx, char.ID, novel.TaskStatusCompleted, ""); err != nil {
+				log.Warn().Err(err).Str("character_id", char.ID).Msg("更新角色状态失败")
+			}
 		}
-
-		imageIDs = append(imageIDs, imageID)
 	}
-
-	return imageIDs, nil
 }
 
 // generateCharacterImage 生成单个角色图片
-func (s *novelService) generateCharacterImage(ctx context.Context, novel *novel.Novel, char *novel.Character) (string, error) {
-	outputFilename := fmt.Sprintf("character_%s.jpeg", char.Name)
+func (s *novelService) generateCharacterImage(ctx context.Context, novelEntity *novel.Novel, char *novel.Character, subtype novel.CharacterImageSubtype) (string, error) {
+	// 根据细分类调整提示词
+	prompt := char.ImagePrompt
+	switch subtype {
+	case novel.CharacterImageSubtypeFront:
+		prompt = prompt + "，正视图"
+	case novel.CharacterImageSubtypeThreeView:
+		prompt = prompt + "，三视图（正面、侧面、背面）"
+	case novel.CharacterImageSubtypeDetail:
+		prompt = prompt + "，细节图（特写）"
+	}
 
-	imageData, err := s.imageProvider.GenerateImage(ctx, char.ImagePrompt, outputFilename)
+	// 添加角色图片生成要求：只生成角色人物图，不包含背景、其他人物、其他物品等
+	prompt = prompt + "，纯色背景或透明背景，只包含该角色人物，不包含其他人物、物品、道具、场景背景等，人物全身或半身，高质量角色立绘"
+
+	outputFilename := fmt.Sprintf("character_%s_%s.jpeg", char.Name, subtype)
+
+	imageData, err := s.imageProvider.GenerateImage(ctx, prompt, outputFilename)
 	if err != nil {
 		return "", fmt.Errorf("generate image: %w", err)
 	}
 
 	uploadReq := &service.UploadFileRequest{
-		UserID:      novel.UserID,
+		UserID:      novelEntity.UserID,
 		FileName:    outputFilename,
 		ContentType: "image/jpeg",
 		Ext:         "jpeg",
@@ -329,144 +208,127 @@ func (s *novelService) generateCharacterImage(ctx context.Context, novel *novel.
 		return "", fmt.Errorf("upload image: %w", err)
 	}
 
-	// 更新角色的 ImageResourceID
-	updates := bson.M{"image_resource_id": uploadResult.ResourceID}
-	if err := s.characterRepo.Update(ctx, char.ID, updates); err != nil {
-		return "", fmt.Errorf("update character: %w", err)
+	// 将图片保存到 Image 表
+	imageID := id.New()
+	characterImage := &novel.Image{
+		ID:                    imageID,
+		NovelID:               novelEntity.ID,
+		ImageType:             novel.ImageTypeCharacter,
+		CharacterID:           char.ID,
+		CharacterImageSubtype: subtype,
+		ImageResourceID:       uploadResult.ResourceID,
+		Prompt:                prompt,
+		Version:               1,
+		Status:                novel.TaskStatusCompleted,
+		CreatedAt:             time.Now(),
+		UpdatedAt:             time.Now(),
 	}
 
-	log.Info().Str("character_id", char.ID).Str("character_name", char.Name).Msg("角色图片生成成功")
-	return uploadResult.ResourceID, nil
+	if err := s.imageRepo.Create(ctx, characterImage); err != nil {
+		return "", fmt.Errorf("create character image record: %w", err)
+	}
+
+	log.Info().
+		Str("character_id", char.ID).
+		Str("character_name", char.Name).
+		Str("subtype", string(subtype)).
+		Str("image_id", imageID).
+		Msg("角色图片生成成功")
+	return imageID, nil
 }
 
 // GenerateSceneImages 为解说的所有场景生成图片
+// 注意：narration 模块已删除，此方法需要重构
 func (s *novelService) GenerateSceneImages(ctx context.Context, narrationID string) ([]string, error) {
-	narration, err := s.narrationRepo.FindByID(ctx, narrationID)
-	if err != nil {
-		return nil, fmt.Errorf("find narration: %w", err)
-	}
-
-	scenes, err := s.sceneRepo.FindByNarrationID(ctx, narrationID)
-	if err != nil {
-		return nil, fmt.Errorf("find scenes: %w", err)
-	}
-
-	if len(scenes) == 0 {
-		return []string{}, nil
-	}
-
-	chapter, err := s.chapterRepo.FindByID(ctx, narration.ChapterID)
-	if err != nil {
-		return nil, fmt.Errorf("find chapter: %w", err)
-	}
-
-	var imageIDs []string
-	for _, scene := range scenes {
-		if scene.ImagePrompt == "" {
-			log.Warn().Str("scene_id", scene.ID).Str("scene_number", scene.SceneNumber).Msg("场景图片提示词为空，跳过")
-			continue
-		}
-
-		if scene.ImageResourceID != "" {
-			log.Info().Str("scene_id", scene.ID).Str("scene_number", scene.SceneNumber).Msg("场景图片已存在，跳过")
-			continue
-		}
-
-		imageID, err := s.generateSceneImage(ctx, chapter, scene)
-		if err != nil {
-			log.Error().Err(err).Str("scene_id", scene.ID).Str("scene_number", scene.SceneNumber).Msg("生成场景图片失败")
-			continue
-		}
-
-		imageIDs = append(imageIDs, imageID)
-	}
-
-	return imageIDs, nil
+	// TODO: 重构此方法，不再依赖 narration
+	return nil, fmt.Errorf("narration module has been removed, this method needs to be refactored")
 }
 
-// generateSceneImage 生成单个场景图片
-func (s *novelService) generateSceneImage(ctx context.Context, chapter *novel.Chapter, scene *novel.Scene) (string, error) {
-	outputFilename := fmt.Sprintf("chapter_%03d_scene_%s.jpeg", chapter.Sequence, scene.SceneNumber)
-
-	imageData, err := s.imageProvider.GenerateImage(ctx, scene.ImagePrompt, outputFilename)
+// GeneratePropImages 为小说的所有道具生成图片（异步执行，立即返回）
+func (s *novelService) GeneratePropImages(ctx context.Context, novelID string) error {
+	// 检查小说是否存在
+	novelEntity, err := s.novelRepo.FindByID(ctx, novelID)
 	if err != nil {
-		return "", fmt.Errorf("generate image: %w", err)
+		return fmt.Errorf("find novel: %w", err)
 	}
 
-	uploadReq := &service.UploadFileRequest{
-		UserID:      chapter.UserID,
-		FileName:    outputFilename,
-		ContentType: "image/jpeg",
-		Ext:         "jpeg",
-		Data:        bytes.NewReader(imageData),
-	}
-
-	uploadResult, err := s.resourceService.UploadFile(ctx, uploadReq)
-	if err != nil {
-		return "", fmt.Errorf("upload image: %w", err)
-	}
-
-	// 更新场景的 ImageResourceID
-	updates := map[string]interface{}{"image_resource_id": uploadResult.ResourceID}
-	if err := s.sceneRepo.Update(ctx, scene.ID, updates); err != nil {
-		return "", fmt.Errorf("update scene: %w", err)
-	}
-
-	log.Info().Str("scene_id", scene.ID).Str("scene_number", scene.SceneNumber).Msg("场景图片生成成功")
-	return uploadResult.ResourceID, nil
-}
-
-// GeneratePropImages 为小说的所有道具生成图片
-func (s *novelService) GeneratePropImages(ctx context.Context, novelID string) ([]string, error) {
+	// 获取所有道具
 	props, err := s.propRepo.FindByNovelID(ctx, novelID)
 	if err != nil {
-		return nil, fmt.Errorf("find props: %w", err)
+		return fmt.Errorf("find props: %w", err)
 	}
 
 	if len(props) == 0 {
-		return []string{}, nil
+		return nil
 	}
 
-	novelEntity, err := s.novelRepo.FindByID(ctx, novelID)
-	if err != nil {
-		return nil, fmt.Errorf("find novel: %w", err)
+	// 将所有道具状态设置为 pending
+	for _, prop := range props {
+		if err := s.propRepo.UpdateStatus(ctx, prop.ID, novel.TaskStatusPending, ""); err != nil {
+			log.Warn().Err(err).Str("prop_id", prop.ID).Msg("更新道具状态失败")
+		}
 	}
 
-	var imageIDs []string
+	// 启动异步任务
+	go s.generatePropImagesAsync(context.Background(), novelEntity, props)
+
+	return nil
+}
+
+// generatePropImagesAsync 异步生成道具图片
+func (s *novelService) generatePropImagesAsync(ctx context.Context, novelEntity *novel.Novel, props []*novel.Prop) {
 	for _, prop := range props {
 		if prop.ImagePrompt == "" {
 			log.Warn().Str("prop_id", prop.ID).Str("prop_name", prop.Name).Msg("道具图片提示词为空，跳过")
+			// 更新状态为失败
+			if err := s.propRepo.UpdateStatus(ctx, prop.ID, novel.TaskStatusFailed, "图片提示词为空"); err != nil {
+				log.Warn().Err(err).Str("prop_id", prop.ID).Msg("更新道具状态失败")
+			}
 			continue
 		}
 
-		if prop.ImageResourceID != "" {
-			log.Info().Str("prop_id", prop.ID).Str("prop_name", prop.Name).Msg("道具图片已存在，跳过")
+		// 检查道具是否已有图片（通过查询 Image 表）
+		existingImages, err := s.imageRepo.FindByPropID(ctx, prop.ID)
+		if err == nil && len(existingImages) > 0 {
+			log.Info().Str("prop_id", prop.ID).Str("prop_name", prop.Name).Int("count", len(existingImages)).Msg("道具图片已存在，跳过")
+			// 更新状态为已完成
+			if err := s.propRepo.UpdateStatus(ctx, prop.ID, novel.TaskStatusCompleted, ""); err != nil {
+				log.Warn().Err(err).Str("prop_id", prop.ID).Msg("更新道具状态失败")
+			}
 			continue
 		}
 
 		imageID, err := s.generatePropImage(ctx, novelEntity, prop)
 		if err != nil {
 			log.Error().Err(err).Str("prop_id", prop.ID).Str("prop_name", prop.Name).Msg("生成道具图片失败")
-			continue
+			// 更新状态为失败
+			if err := s.propRepo.UpdateStatus(ctx, prop.ID, novel.TaskStatusFailed, err.Error()); err != nil {
+				log.Warn().Err(err).Str("prop_id", prop.ID).Msg("更新道具状态失败")
+			}
+		} else {
+			log.Info().Str("prop_id", prop.ID).Str("prop_name", prop.Name).Str("image_id", imageID).Msg("道具图片生成成功")
+			// 更新状态为已完成
+			if err := s.propRepo.UpdateStatus(ctx, prop.ID, novel.TaskStatusCompleted, ""); err != nil {
+				log.Warn().Err(err).Str("prop_id", prop.ID).Msg("更新道具状态失败")
+			}
 		}
-
-		imageIDs = append(imageIDs, imageID)
 	}
-
-	return imageIDs, nil
 }
 
 // generatePropImage 生成单个道具图片
-func (s *novelService) generatePropImage(ctx context.Context, novel *novel.Novel, prop *novel.Prop) (string, error) {
+func (s *novelService) generatePropImage(ctx context.Context, novelEntity *novel.Novel, prop *novel.Prop) (string, error) {
+	// 添加道具图片生成要求：纯白背景，只包含道具本身，不包含其他元素
+	prompt := prop.ImagePrompt + "，纯白色背景，只包含该道具物品，不包含其他人物、物品、道具、场景背景等，高质量道具展示图"
+
 	outputFilename := fmt.Sprintf("prop_%s.jpeg", prop.Name)
 
-	imageData, err := s.imageProvider.GenerateImage(ctx, prop.ImagePrompt, outputFilename)
+	imageData, err := s.imageProvider.GenerateImage(ctx, prompt, outputFilename)
 	if err != nil {
 		return "", fmt.Errorf("generate image: %w", err)
 	}
 
 	uploadReq := &service.UploadFileRequest{
-		UserID:      novel.UserID,
+		UserID:      novelEntity.UserID,
 		FileName:    outputFilename,
 		ContentType: "image/jpeg",
 		Ext:         "jpeg",
@@ -478,12 +340,35 @@ func (s *novelService) generatePropImage(ctx context.Context, novel *novel.Novel
 		return "", fmt.Errorf("upload image: %w", err)
 	}
 
-	// 更新道具的 ImageResourceID
-	updates := map[string]interface{}{"image_resource_id": uploadResult.ResourceID}
-	if err := s.propRepo.Update(ctx, prop.ID, updates); err != nil {
-		return "", fmt.Errorf("update prop: %w", err)
+	// 道具图片保存到 Image 表
+	imageID := id.New()
+	propImage := &novel.Image{
+		ID:              imageID,
+		NovelID:         novelEntity.ID,
+		PropID:          prop.ID,
+		ImageType:       novel.ImageTypeProp,
+		ImageResourceID: uploadResult.ResourceID,
+		Prompt:          prompt,
+		Version:         1,
+		Status:          novel.TaskStatusCompleted,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
 	}
 
-	log.Info().Str("prop_id", prop.ID).Str("prop_name", prop.Name).Msg("道具图片生成成功")
-	return uploadResult.ResourceID, nil
+	if err := s.imageRepo.Create(ctx, propImage); err != nil {
+		return "", fmt.Errorf("create prop image record: %w", err)
+	}
+
+	log.Info().Str("prop_id", prop.ID).Str("prop_name", prop.Name).Str("image_id", imageID).Msg("道具图片生成成功")
+	return imageID, nil
+}
+
+// GetCharacterImages 获取角色的所有图片
+func (s *novelService) GetCharacterImages(ctx context.Context, characterID string) ([]*novel.Image, error) {
+	return s.imageRepo.FindByCharacterID(ctx, characterID)
+}
+
+// GetPropImages 获取道具的所有图片
+func (s *novelService) GetPropImages(ctx context.Context, propID string) ([]*novel.Image, error) {
+	return s.imageRepo.FindByPropID(ctx, propID)
 }

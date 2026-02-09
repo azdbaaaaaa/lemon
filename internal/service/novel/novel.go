@@ -17,12 +17,13 @@ import (
 // 组合所有子模块的服务接口
 type NovelService interface {
 	ChapterService
-	NarrationService
 	AudioService
 	SubtitleService
 	ImageService
 	CharacterService
+	PropService
 	VideoService
+	SceneService
 }
 
 // novelService 小说服务实现
@@ -30,7 +31,6 @@ type novelService struct {
 	resourceService service.ResourceService
 	novelRepo       novelrepo.NovelRepository
 	chapterRepo     novelrepo.ChapterRepository
-	narrationRepo   novelrepo.NarrationRepository
 	sceneRepo       novelrepo.SceneRepository
 	shotRepo        novelrepo.ShotRepository
 	audioRepo       novelrepo.AudioRepository
@@ -54,7 +54,6 @@ func NewNovelService(
 	// 初始化所有 repository
 	novelRepo := novelrepo.NewNovelRepo(db)
 	chapterRepo := novelrepo.NewChapterRepo(db)
-	narrationRepo := novelrepo.NewNarrationRepo(db)
 	sceneRepo := novelrepo.NewSceneRepo(db)
 	shotRepo := novelrepo.NewShotRepo(db)
 	audioRepo := novelrepo.NewAudioRepo(db)
@@ -98,7 +97,6 @@ func NewNovelService(
 		resourceService: resourceService,
 		novelRepo:       novelRepo,
 		chapterRepo:     chapterRepo,
-		narrationRepo:   narrationRepo,
 		sceneRepo:       sceneRepo,
 		shotRepo:        shotRepo,
 		audioRepo:       audioRepo,

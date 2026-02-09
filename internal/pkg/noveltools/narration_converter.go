@@ -4,17 +4,15 @@ import (
 	"fmt"
 
 	"lemon/internal/model/novel"
+	"lemon/internal/pkg/id"
 )
 
 // ConvertToScenesAndShots 将解析后的 JSON 内容转换为 Scene、Shot、Character、Prop 实体
 // 这是一个纯函数，不依赖任何 service 层状态，适合放在 pkg 包中
-// narrationID 用作一次解说生成的批次标识；同一章节可有多个版本，每个版本对应一个 narrationID
 func ConvertToScenesAndShots(
-	narrationID string,
 	chapterID string,
 	novelID string,
 	userID string,
-	version int,
 	jsonContent *NarrationJSONContent,
 ) ([]*novel.Scene, []*novel.Shot, []*novel.Character, []*novel.Prop, error) {
 	var scenes []*novel.Scene
@@ -33,7 +31,7 @@ func ConvertToScenesAndShots(
 			continue
 		}
 		character := &novel.Character{
-			ID:          fmt.Sprintf("%s-char-%s-v%d", narrationID, jsonChar.Name, version),
+			ID:          id.New(),
 			NovelID:     novelID,
 			Name:        jsonChar.Name,
 			Gender:      jsonChar.Gender,
@@ -58,7 +56,7 @@ func ConvertToScenesAndShots(
 			continue
 		}
 		prop := &novel.Prop{
-			ID:          fmt.Sprintf("%s-prop-%s-v%d", narrationID, jsonProp.Name, version),
+			ID:          id.New(),
 			NovelID:     novelID,
 			Name:        jsonProp.Name,
 			Description: jsonProp.Description,
@@ -70,27 +68,20 @@ func ConvertToScenesAndShots(
 		propMap[jsonProp.Name] = prop
 	}
 
-	globalShotIndex := 1 // 全局镜头索引（在所有镜头中的顺序，从1开始）
-
 	for sceneSeq, jsonScene := range jsonContent.Scenes {
 		if jsonScene == nil {
 			continue
 		}
 
 		// 创建 Scene 实体
-		sceneID := fmt.Sprintf("%s-scene-%s-v%d", narrationID, jsonScene.SceneNumber, version)
+		sceneID := fmt.Sprintf("scene-%d", sceneSeq+1)
 		scene := &novel.Scene{
 			ID:          sceneID,
-			NarrationID: narrationID,
 			ChapterID:   chapterID,
 			NovelID:     novelID,
 			UserID:      userID,
-			SceneNumber: jsonScene.SceneNumber,
 			Description: jsonScene.Description,
-			ImagePrompt: jsonScene.ImagePrompt,
-			Narration:   jsonScene.Narration,
 			Sequence:    sceneSeq + 1, // 从1开始
-			Version:     version,
 			Status:      novel.TaskStatusCompleted,
 		}
 		scenes = append(scenes, scene)
@@ -101,31 +92,22 @@ func ConvertToScenesAndShots(
 				continue
 			}
 
-			shotID := fmt.Sprintf("%s-shot-%s-%s-v%d", narrationID, jsonScene.SceneNumber, jsonShot.CloseupNumber, version)
+			shotID := fmt.Sprintf("shot-%d-%d", sceneSeq+1, shotSeq+1)
 			shot := &novel.Shot{
-				ID:          shotID,
-				SceneID:     sceneID,
-				SceneNumber: jsonScene.SceneNumber,
-				NarrationID: narrationID,
-				ChapterID:   chapterID,
-				NovelID:     novelID,
-				UserID:      userID,
-				ShotNumber:     jsonShot.CloseupNumber,
-				Character:      jsonShot.Character,
-				Image:          jsonShot.Image,
-				Narration:      jsonShot.Narration,
-				SoundEffect:    jsonShot.SoundEffect,
-				Duration:       jsonShot.Duration,
-				ImagePrompt:    jsonShot.ImagePrompt,
-				VideoPrompt:    jsonShot.VideoPrompt,
-				CameraMovement: jsonShot.CameraMovement,
-				Sequence:       shotSeq + 1,     // 在场景中的顺序，从1开始
-				Index:          globalShotIndex, // 全局索引
-				Version:        version,
-				Status:         novel.TaskStatusCompleted,
+				ID:               shotID,
+				SceneID:          sceneID,
+				ChapterID:        chapterID,
+				NovelID:          novelID,
+				UserID:           userID,
+				Narration:        jsonShot.Narration,
+				Duration:         jsonShot.Duration,
+				FirstImagePrompt: jsonShot.FirstImagePrompt,
+				LastImagePrompt:  jsonShot.LastImagePrompt,
+				VideoPrompt:      jsonShot.VideoPrompt,
+				Sequence:         shotSeq + 1, // 在场景中的顺序，从1开始
+				Status:           novel.TaskStatusCompleted,
 			}
 			shots = append(shots, shot)
-			globalShotIndex++
 		}
 	}
 

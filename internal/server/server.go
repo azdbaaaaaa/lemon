@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -17,9 +18,11 @@ import (
 	novelHandler "lemon/internal/handler/novel"
 	resourceHandler "lemon/internal/handler/resource"
 	"lemon/internal/pkg/cache"
+	"lemon/internal/pkg/jwt"
 	"lemon/internal/pkg/mongodb"
 	"lemon/internal/pkg/storagefactory"
 	authRepo "lemon/internal/repository/auth"
+	novelRepo "lemon/internal/repository/novel"
 	"lemon/internal/server/middleware"
 	"lemon/internal/service"
 	novelService "lemon/internal/service/novel"
@@ -125,6 +128,7 @@ func (s *Server) setupRoutes() {
 	v1 := s.engine.Group("/api/v1")
 	{
 		// 认证接口（公开）
+		var jwtUtil *jwt.JWT
 		if s.mongo != nil {
 			userRepo := authRepo.NewUserRepo(s.mongo.Database())
 			refreshTokenRepo := authRepo.NewRefreshTokenRepo(s.mongo.Database())
@@ -146,6 +150,9 @@ func (s *Server) setupRoutes() {
 				refreshTokenExpiry = 7 * 24 * time.Hour
 			}
 
+			// 创建 JWT 工具实例（用于认证中间件）
+			jwtUtil = jwt.NewJWT(jwtSecret, accessTokenExpiry)
+
 			authSvc := service.NewAuthService(
 				userRepo,
 				refreshTokenRepo,
@@ -160,12 +167,11 @@ func (s *Server) setupRoutes() {
 			v1.POST("/auth/refresh", authHdl.Refresh)
 
 			// 需要认证的接口
-			// TODO: 添加认证中间件
-			// auth := v1.Group("")
-			// auth.Use(middleware.Auth())
+			authGroup := v1.Group("")
+			authGroup.Use(middleware.Auth(jwtUtil))
 			{
-				v1.POST("/auth/logout", authHdl.Logout)
-				v1.GET("/auth/me", authHdl.GetMe)
+				authGroup.POST("/auth/logout", authHdl.Logout)
+				authGroup.GET("/auth/me", authHdl.GetMe)
 			}
 		} else {
 			log.Warn().Msg("MongoDB not configured, auth endpoints disabled")
@@ -185,104 +191,153 @@ func (s *Server) setupRoutes() {
 		// TODO: 实现conversation模块（需要先完成model定义）
 
 		// Resource 接口（资源管理）
-		if s.mongo != nil {
+		if s.mongo != nil && jwtUtil != nil {
 			// 初始化 ResourceService（需要 storage）
 			storage, err := storagefactory.NewStorage(context.Background(), &s.cfg.Storage)
 			if err != nil {
 				log.Warn().Err(err).Msg("failed to initialize storage, resource endpoints disabled")
 			} else {
-				resourceSvc := service.NewResourceService(s.mongo.Database(), storage)
+				// 构建API基础URL
+				baseURL := s.buildBaseURL()
+				resourceSvc := service.NewResourceService(s.mongo.Database(), storage, baseURL)
 				resourceHdl := resourceHandler.NewHandler(resourceSvc)
 
-				// 资源管理接口
-				v1.POST("/resources/upload", resourceHdl.UploadFile)
-				v1.GET("/resources", resourceHdl.ListResources)
-				v1.GET("/resources/:resource_id", resourceHdl.GetResource)
+				// 资源下载接口（公开访问，不需要认证）
+				// 支持两种格式：/resources/:resource_id/download 和 /resources/:resource_id/download.:ext
 				v1.GET("/resources/:resource_id/download", resourceHdl.DownloadFile)
-				v1.GET("/resources/:resource_id/download-url", resourceHdl.GetDownloadURL)
+				v1.GET("/resources/:resource_id/download.:ext", resourceHdl.DownloadFile)
+
+				// 资源管理接口（需要认证）
+				resourceGroup := v1.Group("")
+				resourceGroup.Use(middleware.Auth(jwtUtil))
+				{
+					resourceGroup.POST("/resources/upload", resourceHdl.UploadFile)
+					resourceGroup.GET("/resources", resourceHdl.ListResources)
+					resourceGroup.GET("/resources/:resource_id", resourceHdl.GetResource)
+					resourceGroup.GET("/resources/:resource_id/download-url", resourceHdl.GetDownloadURL)
+				}
 			}
 		} else {
-			log.Warn().Msg("MongoDB not configured, resource endpoints disabled")
+			if s.mongo == nil {
+				log.Warn().Msg("MongoDB not configured, resource endpoints disabled")
+			}
+			if jwtUtil == nil {
+				log.Warn().Msg("JWT not configured, resource endpoints disabled")
+			}
 		}
 
 		// Novel 接口（小说与创作相关）
-		if s.mongo != nil {
+		if s.mongo != nil && jwtUtil != nil {
 			// 初始化 ResourceService（需要 storage）
 			storage, err := storagefactory.NewStorage(context.Background(), &s.cfg.Storage)
 			if err != nil {
 				log.Warn().Err(err).Msg("failed to initialize storage, novel endpoints disabled")
 			} else {
 				db := s.mongo.Database()
-				resourceSvc := service.NewResourceService(db, storage)
+				// 构建API基础URL
+				baseURL := s.buildBaseURL()
+				resourceSvc := service.NewResourceService(db, storage, baseURL)
 
 				// 初始化 NovelService
 				novelSvc, err := novelService.NewNovelService(db, resourceSvc)
 				if err != nil {
 					log.Warn().Err(err).Msg("failed to initialize NovelService, novel endpoints disabled")
 				} else {
-					novelHdl := novelHandler.NewHandler(novelSvc)
+					// 初始化所有 Repository（用于 ContentService）
+					novelRepoInst := novelRepo.NewNovelRepo(db)
+					chapterRepoInst := novelRepo.NewChapterRepo(db)
+					sceneRepoInst := novelRepo.NewSceneRepo(db)
+					shotRepoInst := novelRepo.NewShotRepo(db)
+					characterRepoInst := novelRepo.NewCharacterRepo(db)
+					propRepoInst := novelRepo.NewPropRepo(db)
+					// 初始化 ContentService
+					contentSvc := novelService.NewContentService(novelSvc, novelRepoInst, chapterRepoInst, sceneRepoInst, shotRepoInst, characterRepoInst, propRepoInst)
+					// 创建Handler，同时传入NovelService、ContentService和ResourceService
+					contentHdl := novelHandler.NewHandler(novelSvc, contentSvc, resourceSvc)
 
-					// 小说管理接口
-					v1.POST("/novels", novelHdl.CreateNovel)
-					v1.GET("/novels/:novel_id", novelHdl.GetNovel)
+					// 内容管理接口（需要认证）
+					contentGroup := v1.Group("")
+					contentGroup.Use(middleware.Auth(jwtUtil))
+					{
+						// 剧本管理接口
+						contentGroup.POST("/novels", contentHdl.CreateNovel)
+						contentGroup.GET("/novels", contentHdl.ListNovels)
+						contentGroup.GET("/novels/detail", contentHdl.GetNovel)
+						contentGroup.POST("/novels/generate-content", contentHdl.GenerateContent)
+						contentGroup.GET("/novels/generation-status", contentHdl.GetGenerationStatus)
 
-					// 章节管理接口
-					v1.POST("/novels/:novel_id/chapters/split", novelHdl.SplitChapters)
-					v1.GET("/novels/:novel_id/chapters", novelHdl.GetChapters)
+						// 章节管理接口
+						contentGroup.GET("/chapters", contentHdl.GetChapters)
+						contentGroup.POST("/chapters/split", contentHdl.SplitChapters)
 
-					// 解说管理接口
-					v1.POST("/novels/chapters/:chapter_id/narration", novelHdl.GenerateNarration)
-					v1.POST("/novels/chapters/:chapter_id/narration/manual", novelHdl.CreateNarrationVersionManual)
-					v1.POST("/novels/:novel_id/chapters/narration", novelHdl.GenerateNarrationsForAllChapters)
-					v1.GET("/novels/chapters/:chapter_id/narration", novelHdl.GetNarration)
-					v1.GET("/novels/chapters/:chapter_id/narration/version/:version", novelHdl.GetNarrationByVersion)
-					v1.GET("/novels/chapters/:chapter_id/narration/versions", novelHdl.GetNarrationVersions)
-					v1.GET("/novels/chapters/:chapter_id/narrations", novelHdl.ListNarrationsByChapterID)
-					v1.PUT("/narrations/:narration_id/version", novelHdl.SetNarrationVersion)
+						// 场景管理接口
+						contentGroup.GET("/scenes", contentHdl.GetScenes)
+						contentGroup.POST("/scenes/generate", contentHdl.GenerateScenes)
+						contentGroup.PUT("/scenes/version", contentHdl.SetActiveSceneVersion)
 
-					// 解说内容（场景/镜头）查询接口（用于人工编辑/比对）
-					v1.GET("/narrations/:narration_id/scenes", novelHdl.GetScenesByNarration)
-					v1.GET("/narrations/:narration_id/shots", novelHdl.GetShotsByNarration)
+						// 镜头管理接口
+						contentGroup.GET("/shots", contentHdl.GetShots)
+						contentGroup.PUT("/shots", contentHdl.UpdateShot)
 
-					// 分镜头管理接口
-					v1.PUT("/shots/:shot_id", novelHdl.UpdateShot)
-					v1.POST("/shots/:shot_id/regenerate", novelHdl.RegenerateShotScript)
+						// 角色管理接口
+						contentGroup.GET("/characters", contentHdl.GetCharactersByNovelID)
+						contentGroup.GET("/characters/detail", contentHdl.GetCharacterByName)
+						contentGroup.POST("/characters/sync", contentHdl.SyncCharacters)
+						contentGroup.POST("/characters/images", contentHdl.GenerateCharacterImages)
+						contentGroup.GET("/characters/images/status", contentHdl.GetCharacterImageGenerationStatus)
 
-					// 音频生成接口
-					v1.POST("/narrations/:narration_id/audios", novelHdl.GenerateAudios)
-					v1.GET("/narrations/:narration_id/audios", novelHdl.ListAudiosByNarration)
-					v1.GET("/narrations/:narration_id/audios/versions", novelHdl.GetAudioVersions)
+						// 道具管理接口
+						contentGroup.GET("/props", contentHdl.GetPropsByNovelID)
+						contentGroup.POST("/props/images", contentHdl.GeneratePropImages)
+						contentGroup.GET("/props/images/status", contentHdl.GetPropImageGenerationStatus)
+					}
 
-					// 字幕生成接口
-					v1.POST("/narrations/:narration_id/subtitles", novelHdl.GenerateSubtitles)
-					v1.GET("/narrations/:narration_id/subtitles", novelHdl.ListSubtitlesByNarration)
-					v1.GET("/novels/chapters/:chapter_id/subtitles/versions", novelHdl.GetSubtitleVersions)
+					// 其他接口（音频、字幕、视频、图片等，使用 contentHdl）
+					// 注意：这些接口可能依赖已删除的narration模块，需要后续重构
+					novelGroup := v1.Group("")
+					novelGroup.Use(middleware.Auth(jwtUtil))
+					{
+						// 音频生成接口
+						novelGroup.POST("/narrations/:narration_id/audios", contentHdl.GenerateAudios)
+						novelGroup.GET("/narrations/:narration_id/audios", contentHdl.ListAudiosByNarration)
+						novelGroup.GET("/narrations/:narration_id/audios/versions", contentHdl.GetAudioVersions)
+						// 基于章节的音频生成接口（新接口）
+						novelGroup.POST("/chapters/:chapter_id/audios", contentHdl.GenerateAudiosForChapter)
 
-					// 图片生成接口
-					v1.POST("/narrations/:narration_id/images", novelHdl.GenerateImages)
-					v1.GET("/narrations/:narration_id/images", novelHdl.ListImagesByNarration)
-					v1.GET("/novels/chapters/:chapter_id/images/versions", novelHdl.GetImageVersions)
-					v1.POST("/novels/:novel_id/characters/images", novelHdl.GenerateCharacterImages)
-					v1.POST("/narrations/:narration_id/scenes/images", novelHdl.GenerateSceneImages)
-					v1.POST("/novels/:novel_id/props/images", novelHdl.GeneratePropImages)
+						// 字幕生成接口
+						novelGroup.POST("/narrations/:narration_id/subtitles", contentHdl.GenerateSubtitles)
+						novelGroup.GET("/narrations/:narration_id/subtitles", contentHdl.ListSubtitlesByNarration)
+						novelGroup.GET("/novels/chapters/:chapter_id/subtitles/versions", contentHdl.GetSubtitleVersions)
 
-					// 角色管理接口
-					v1.POST("/novels/:novel_id/characters/sync", novelHdl.SyncCharacters)
-					v1.GET("/novels/:novel_id/characters", novelHdl.GetCharactersByNovelID)
-					v1.GET("/novels/:novel_id/characters/:name", novelHdl.GetCharacterByName)
+						// 图片生成接口
+						novelGroup.POST("/narrations/:narration_id/images", contentHdl.GenerateImages)
+						novelGroup.GET("/narrations/:narration_id/images", contentHdl.ListImagesByNarration)
+						novelGroup.GET("/novels/chapters/:chapter_id/images/versions", contentHdl.GetImageVersions)
 
-					// 视频生成接口
-					v1.POST("/novels/chapters/:chapter_id/videos/narration", novelHdl.GenerateNarrationVideos)
-					v1.POST("/novels/chapters/:chapter_id/videos/final", novelHdl.GenerateFinalVideo)
+						// 视频生成接口
+						novelGroup.POST("/novels/chapters/:chapter_id/videos/narration", contentHdl.GenerateNarrationVideos)
+						novelGroup.POST("/novels/chapters/:chapter_id/videos/final", contentHdl.GenerateFinalVideo)
+						// 基于章节的视频生成接口（新接口）
+						novelGroup.POST("/chapters/:chapter_id/videos", contentHdl.GenerateVideosForChapter)
 
-					// 视频查询接口
-					v1.GET("/novels/chapters/:chapter_id/videos", novelHdl.ListVideosByChapter)
-					v1.GET("/novels/chapters/:chapter_id/videos/versions", novelHdl.GetVideoVersions)
-					v1.GET("/videos", novelHdl.GetVideosByStatus)
+						// 视频查询接口
+						novelGroup.GET("/novels/chapters/:chapter_id/videos", contentHdl.ListVideosByChapter)
+						novelGroup.GET("/novels/chapters/:chapter_id/videos/versions", contentHdl.GetVideoVersions)
+						novelGroup.GET("/videos", contentHdl.GetVideosByStatus)
+						// 基于章节的视频查询接口（新接口）
+						novelGroup.GET("/chapters/:chapter_id/videos", contentHdl.ListVideosByChapter)
+						// 基于章节的音频查询接口（新接口）
+						novelGroup.GET("/chapters/:chapter_id/audios", contentHdl.ListAudiosByChapter)
+					}
 				}
 			}
 		} else {
-			log.Warn().Msg("MongoDB not configured, novel endpoints disabled")
+			if s.mongo == nil {
+				log.Warn().Msg("MongoDB not configured, novel endpoints disabled")
+			}
+			if jwtUtil == nil {
+				log.Warn().Msg("JWT not configured, novel endpoints disabled")
+			}
 		}
 	}
 }
@@ -330,4 +385,20 @@ func (s *Server) Run(ctx context.Context, addr string) error {
 // Engine 获取 Gin 引擎 (用于测试)
 func (s *Server) Engine() *gin.Engine {
 	return s.engine
+}
+
+// buildBaseURL 构建API基础URL
+func (s *Server) buildBaseURL() string {
+	host := s.cfg.Server.Host
+	if host == "" {
+		host = "127.0.0.1"
+	} else if host == "0.0.0.0" {
+		// 将 0.0.0.0 转换为 127.0.0.1，以便生成可访问的URL
+		host = "127.0.0.1"
+	}
+	port := s.cfg.Server.Port
+	if port == 0 {
+		port = 7080
+	}
+	return fmt.Sprintf("http://%s:%d", host, port)
 }

@@ -15,15 +15,14 @@ import (
 type VideoRepository interface {
 	Create(ctx context.Context, v *novel.Video) error
 	FindByID(ctx context.Context, id string) (*novel.Video, error)
-	FindByChapterID(ctx context.Context, chapterID string) ([]*novel.Video, error)
-	FindByNarrationID(ctx context.Context, narrationID string) ([]*novel.Video, error)
-	FindByChapterIDAndType(ctx context.Context, chapterID string, videoType novel.VideoType) ([]*novel.Video, error)
-	FindByStatus(ctx context.Context, status novel.VideoStatus) ([]*novel.Video, error) // 用于轮询
-	FindByChapterIDAndVersion(ctx context.Context, chapterID string, version int) ([]*novel.Video, error)
-	FindVersionsByChapterID(ctx context.Context, chapterID string) ([]int, error)
+	FindByShotID(ctx context.Context, shotID string) ([]*novel.Video, error)                                                            // 查询分镜视频
+	FindByChapterID(ctx context.Context, chapterID string) ([]*novel.Video, error)                                                      // 查询章节的所有视频
+	FindByNovelIDAndType(ctx context.Context, novelID string, videoType novel.VideoType) ([]*novel.Video, error)                        // 查询完整视频
+	FindByShotIDAndTypeAndVersion(ctx context.Context, shotID string, videoType novel.VideoType, version int) ([]*novel.Video, error)   // 查询分镜视频（指定版本）
+	FindByNovelIDAndTypeAndVersion(ctx context.Context, novelID string, videoType novel.VideoType, version int) ([]*novel.Video, error) // 查询完整视频（指定版本）
+	FindByStatus(ctx context.Context, status novel.VideoStatus) ([]*novel.Video, error)                                                 // 用于轮询
 	UpdateStatus(ctx context.Context, id string, status novel.VideoStatus, errorMsg string) error
 	UpdateVideoResourceID(ctx context.Context, id string, resourceID string, duration float64, prompt string) error
-	UpdateVersion(ctx context.Context, id string, version int) error
 	Delete(ctx context.Context, id string) error
 }
 
@@ -62,10 +61,27 @@ func (r *VideoRepo) FindByID(ctx context.Context, id string) (*novel.Video, erro
 	return &v, nil
 }
 
-// FindByChapterID 根据章节ID查询所有视频
+// FindByShotID 查询分镜视频（按创建时间排序）
+func (r *VideoRepo) FindByShotID(ctx context.Context, shotID string) ([]*novel.Video, error) {
+	filter := bson.M{"shot_id": shotID, "video_type": novel.VideoTypeShot, "deleted_at": nil}
+	opts := options.Find().SetSort(bson.M{"created_at": -1})
+	cursor, err := r.coll.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var videos []*novel.Video
+	if err := cursor.All(ctx, &videos); err != nil {
+		return nil, err
+	}
+	return videos, nil
+}
+
+// FindByChapterID 查询章节的所有视频（按创建时间排序）
 func (r *VideoRepo) FindByChapterID(ctx context.Context, chapterID string) ([]*novel.Video, error) {
 	filter := bson.M{"chapter_id": chapterID, "deleted_at": nil}
-	opts := options.Find().SetSort(bson.M{"sequence": 1})
+	opts := options.Find().SetSort(bson.M{"created_at": -1})
 	cursor, err := r.coll.Find(ctx, filter, opts)
 	if err != nil {
 		return nil, err
@@ -79,10 +95,10 @@ func (r *VideoRepo) FindByChapterID(ctx context.Context, chapterID string) ([]*n
 	return videos, nil
 }
 
-// FindByNarrationID 根据解说ID查询所有视频
-func (r *VideoRepo) FindByNarrationID(ctx context.Context, narrationID string) ([]*novel.Video, error) {
-	filter := bson.M{"narration_id": narrationID, "deleted_at": nil}
-	opts := options.Find().SetSort(bson.M{"sequence": 1})
+// FindByNovelIDAndType 查询完整视频（按创建时间排序）
+func (r *VideoRepo) FindByNovelIDAndType(ctx context.Context, novelID string, videoType novel.VideoType) ([]*novel.Video, error) {
+	filter := bson.M{"novel_id": novelID, "video_type": videoType, "deleted_at": nil}
+	opts := options.Find().SetSort(bson.M{"created_at": -1})
 	cursor, err := r.coll.Find(ctx, filter, opts)
 	if err != nil {
 		return nil, err
@@ -96,10 +112,37 @@ func (r *VideoRepo) FindByNarrationID(ctx context.Context, narrationID string) (
 	return videos, nil
 }
 
-// FindByChapterIDAndType 根据章节ID和视频类型查询视频
-func (r *VideoRepo) FindByChapterIDAndType(ctx context.Context, chapterID string, videoType novel.VideoType) ([]*novel.Video, error) {
-	filter := bson.M{"chapter_id": chapterID, "video_type": videoType, "deleted_at": nil}
-	opts := options.Find().SetSort(bson.M{"sequence": 1})
+// FindByShotIDAndTypeAndVersion 查询分镜视频（指定版本）
+func (r *VideoRepo) FindByShotIDAndTypeAndVersion(ctx context.Context, shotID string, videoType novel.VideoType, version int) ([]*novel.Video, error) {
+	filter := bson.M{
+		"shot_id":    shotID,
+		"video_type": videoType,
+		"version":    version,
+		"deleted_at": nil,
+	}
+	opts := options.Find().SetSort(bson.M{"created_at": -1})
+	cursor, err := r.coll.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var videos []*novel.Video
+	if err := cursor.All(ctx, &videos); err != nil {
+		return nil, err
+	}
+	return videos, nil
+}
+
+// FindByNovelIDAndTypeAndVersion 查询完整视频（指定版本）
+func (r *VideoRepo) FindByNovelIDAndTypeAndVersion(ctx context.Context, novelID string, videoType novel.VideoType, version int) ([]*novel.Video, error) {
+	filter := bson.M{
+		"novel_id":   novelID,
+		"video_type": videoType,
+		"version":    version,
+		"deleted_at": nil,
+	}
+	opts := options.Find().SetSort(bson.M{"created_at": -1})
 	cursor, err := r.coll.Find(ctx, filter, opts)
 	if err != nil {
 		return nil, err
@@ -128,56 +171,6 @@ func (r *VideoRepo) FindByStatus(ctx context.Context, status novel.VideoStatus) 
 		return nil, err
 	}
 	return videos, nil
-}
-
-// FindByChapterIDAndVersion 根据章节ID和版本号查询视频
-func (r *VideoRepo) FindByChapterIDAndVersion(ctx context.Context, chapterID string, version int) ([]*novel.Video, error) {
-	filter := bson.M{"chapter_id": chapterID, "version": version, "deleted_at": nil}
-	opts := options.Find().SetSort(bson.M{"sequence": 1})
-	cursor, err := r.coll.Find(ctx, filter, opts)
-	if err != nil {
-		return nil, err
-	}
-	defer cursor.Close(ctx)
-
-	var videos []*novel.Video
-	if err := cursor.All(ctx, &videos); err != nil {
-		return nil, err
-	}
-	return videos, nil
-}
-
-// FindVersionsByChapterID 查询章节的所有视频版本号
-func (r *VideoRepo) FindVersionsByChapterID(ctx context.Context, chapterID string) ([]int, error) {
-	filter := bson.M{"chapter_id": chapterID, "deleted_at": nil}
-	opts := options.Find().SetProjection(bson.M{"version": 1}).SetSort(bson.M{"created_at": -1})
-	cur, err := r.coll.Find(ctx, filter, opts)
-	if err != nil {
-		return nil, err
-	}
-	defer cur.Close(ctx)
-
-	var versions []int
-	versionSet := make(map[int]bool)
-	for cur.Next(ctx) {
-		var doc bson.M
-		if err := cur.Decode(&doc); err != nil {
-			continue
-		}
-		if version, ok := doc["version"].(int32); ok && version > 0 {
-			v := int(version)
-			if !versionSet[v] {
-				versions = append(versions, v)
-				versionSet[v] = true
-			}
-		} else if version, ok := doc["version"].(int); ok && version > 0 {
-			if !versionSet[version] {
-				versions = append(versions, version)
-				versionSet[version] = true
-			}
-		}
-	}
-	return versions, nil
 }
 
 // UpdateStatus 更新视频状态
@@ -211,19 +204,6 @@ func (r *VideoRepo) UpdateVideoResourceID(ctx context.Context, id string, resour
 		ctx,
 		bson.M{"id": id},
 		bson.M{"$set": update},
-	)
-	return err
-}
-
-// UpdateVersion 更新视频版本号
-func (r *VideoRepo) UpdateVersion(ctx context.Context, id string, version int) error {
-	_, err := r.coll.UpdateOne(
-		ctx,
-		bson.M{"id": id},
-		bson.M{"$set": bson.M{
-			"version":    version,
-			"updated_at": time.Now(),
-		}},
 	)
 	return err
 }

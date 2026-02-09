@@ -6,6 +6,8 @@ import (
 	"io"
 	"strings"
 
+	"go.mongodb.org/mongo-driver/bson"
+
 	"lemon/internal/model/novel"
 	"lemon/internal/pkg/id"
 	"lemon/internal/pkg/noveltools"
@@ -16,26 +18,34 @@ import (
 // 定义小说和章节相关的能力
 type ChapterService interface {
 	// CreateNovelFromResource 根据资源ID创建小说
+	// 注意：格式和每集时长在切分章节时自动确定
 	CreateNovelFromResource(ctx context.Context, resourceID, userID string, narrationType novel.NarrationType, style novel.NovelStyle) (string, error)
 
-	// SplitNovelIntoChapters 根据小说内容切分章节
-	SplitNovelIntoChapters(ctx context.Context, novelID string, targetChapters int) error
+	// SplitChapters 切分章节
+	SplitChapters(ctx context.Context, novelID string, targetChapters int) error
 
 	// GetNovel 获取小说信息
 	GetNovel(ctx context.Context, novelID string) (*novel.Novel, error)
 
 	// GetChapters 获取小说的所有章节
 	GetChapters(ctx context.Context, novelID string) ([]*novel.Chapter, error)
+
+	// GetChapterByID 根据章节ID获取章节信息
+	GetChapterByID(ctx context.Context, chapterID string) (*novel.Chapter, error)
+
+	// ListNovels 查询所有小说列表（分页，不按用户隔离）
+	ListNovels(ctx context.Context, page, pageSize int64) ([]*novel.Novel, int64, error)
+
+	// ListNovelsByUser 根据用户ID查询剧本列表（分页）
+	ListNovelsByUser(ctx context.Context, userID string, page, pageSize int64) ([]*novel.Novel, int64, error)
 }
 
 // CreateNovelFromResource 第一步：根据资源ID获取小说内容，然后创建小说
 // 返回创建的小说ID
+// 注意：格式和每集时长在切分章节时自动确定
 func (s *novelService) CreateNovelFromResource(ctx context.Context, resourceID, userID string, narrationType novel.NarrationType, style novel.NovelStyle) (string, error) {
 	// 使用 ResourceService 获取资源信息（系统内部请求，userID 为空）
-	resResult, err := s.resourceService.GetResource(ctx, &service.GetResourceRequest{
-		ResourceID: resourceID,
-		UserID:     "", // 系统内部请求，可以访问所有资源
-	})
+	resResult, err := s.resourceService.GetResource(ctx, &service.GetResourceRequest{ResourceID: resourceID})
 	if err != nil {
 		return "", fmt.Errorf("failed to find resource: %w", err)
 	}
@@ -73,6 +83,7 @@ func (s *novelService) CreateNovelFromResource(ctx context.Context, resourceID, 
 		Description:   description,
 		NarrationType: narrationType,
 		Style:         style,
+		// EpisodeCount 和 EpisodeDuration 在切分章节时自动确定
 	}
 
 	if err := s.novelRepo.Create(ctx, novelEntity); err != nil {
@@ -82,9 +93,9 @@ func (s *novelService) CreateNovelFromResource(ctx context.Context, resourceID, 
 	return novelID, nil
 }
 
-// SplitNovelIntoChapters 第二步：根据小说内容切分章节，然后插入章节数据
+// SplitChapters 切分章节
 // 需要先从资源中读取内容，然后切分并保存章节
-func (s *novelService) SplitNovelIntoChapters(ctx context.Context, novelID string, targetChapters int) error {
+func (s *novelService) SplitChapters(ctx context.Context, novelID string, targetChapters int) error {
 	novelEntity, err := s.novelRepo.FindByID(ctx, novelID)
 	if err != nil {
 		return fmt.Errorf("failed to find novel: %w", err)
@@ -113,35 +124,41 @@ func (s *novelService) SplitNovelIntoChapters(ctx context.Context, novelID strin
 
 	reader := downloadResult.Data
 
-	content, err := io.ReadAll(reader)
+	novelContent, err := io.ReadAll(reader)
 	if err != nil {
 		return fmt.Errorf("failed to read resource content: %w", err)
 	}
 
+	// 限制最大章节数为 10
+	if targetChapters > 10 {
+		targetChapters = 10
+	}
+
 	splitter := noveltools.NewChapterSplitter()
-	segments := splitter.Split(string(content), targetChapters)
+	segments := splitter.Split(string(novelContent), targetChapters)
 	if len(segments) == 0 {
 		return fmt.Errorf("no chapters split from novel content")
+	}
+
+	// 如果切分后的章节数超过 10，只保留前 10 个
+	if len(segments) > 10 {
+		segments = segments[:10]
 	}
 
 	for i, seg := range segments {
 		chapterID := id.New()
 
-		// 计算章节统计信息
-		totalChars := countChineseCharacters(seg.Text)
+		// 计算章节字数
 		wordCount := countChineseWords(seg.Text)
-		lineCount := len(strings.Split(strings.TrimSpace(seg.Text), "\n"))
 
 		chapterEntity := &novel.Chapter{
-			ID:      chapterID,
-			NovelID: novelID,
-			UserID:  novelEntity.UserID,
+			ID:          chapterID,
+			NovelID:     novelID,
+			UserID:      novelEntity.UserID,
 			Sequence:    i + 1,
 			Title:       seg.Title,
 			ChapterText: seg.Text,
-			TotalChars:  totalChars,
 			WordCount:   wordCount,
-			LineCount:   lineCount,
 		}
 
 		if err := s.chapterRepo.Create(ctx, chapterEntity); err != nil {
@@ -149,23 +166,26 @@ func (s *novelService) SplitNovelIntoChapters(ctx context.Context, novelID strin
 		}
 	}
 
+	// 根据切分后的章节数量自动确定集数和每集时长（最多 10 个章节）
+	episodeCount := len(segments)
+	if episodeCount > 10 {
+		episodeCount = 10
+	}
+	episodeDuration := novel.EpisodeDurationAuto // 默认自动
+
+	// 更新小说的集数和每集时长
+	updates := bson.M{
+		"episode_count":    episodeCount,
+		"episode_duration": episodeDuration,
+	}
+	if err := s.novelRepo.Update(ctx, novelID, updates); err != nil {
+		return fmt.Errorf("failed to update novel episode count: %w", err)
+	}
+
 	return nil
 }
 
-// countChineseCharacters 计算中文字符数量（包括中文标点）
-func countChineseCharacters(text string) int {
-	count := 0
-	for _, r := range text {
-		// 中文字符范围：\u4e00-\u9fff
-		// 中文标点范围：\u3000-\u303f, \uff00-\uffef
-		if (r >= 0x4e00 && r <= 0x9fff) || (r >= 0x3000 && r <= 0x303f) || (r >= 0xff00 && r <= 0xffef) {
-			count++
-		}
-	}
-	return count
-}
-
-// countChineseWords 计算中文字数（仅中文字符，不包括标点）
+// countChineseWords 计算中文字数
 func countChineseWords(text string) int {
 	count := 0
 	for _, r := range text {
@@ -185,6 +205,21 @@ func (s *novelService) GetNovel(ctx context.Context, novelID string) (*novel.Nov
 // GetChapters 获取小说的所有章节
 func (s *novelService) GetChapters(ctx context.Context, novelID string) ([]*novel.Chapter, error) {
 	return s.chapterRepo.FindByNovelID(ctx, novelID)
+}
+
+// GetChapterByID 根据章节ID获取章节信息
+func (s *novelService) GetChapterByID(ctx context.Context, chapterID string) (*novel.Chapter, error) {
+	return s.chapterRepo.FindByID(ctx, chapterID)
+}
+
+// ListNovels 查询所有小说列表（分页，不按用户隔离）
+func (s *novelService) ListNovels(ctx context.Context, page, pageSize int64) ([]*novel.Novel, int64, error) {
+	return s.novelRepo.List(ctx, page, pageSize)
+}
+
+// ListNovelsByUser 根据用户ID查询剧本列表（分页）
+func (s *novelService) ListNovelsByUser(ctx context.Context, userID string, page, pageSize int64) ([]*novel.Novel, int64, error) {
+	return s.novelRepo.ListByUser(ctx, userID, page, pageSize)
 }
 
 // NovelMetadata 小说元数据

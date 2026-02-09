@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-
-	"github.com/rs/zerolog/log"
+	"time"
 
 	"lemon/internal/model/novel"
 	"lemon/internal/pkg/id"
-	"lemon/internal/pkg/noveltools"
 	"lemon/internal/service"
+
+	"github.com/rs/zerolog/log"
 )
 
 // AudioService 章节音频服务接口
@@ -20,11 +20,18 @@ type AudioService interface {
 	// 自动使用最新的版本号+1
 	GenerateAudiosForNarration(ctx context.Context, narrationID string) ([]string, error)
 
+	// GenerateAudiosForChapter 为章节的所有 shot 生成音频
+	// 基于章节的 active_scene_version 获取所有 shot，为每个 shot 的 narration 文本生成音频
+	GenerateAudiosForChapter(ctx context.Context, chapterID string) ([]string, error)
+
 	// GetAudioVersions 获取章节解说的所有音频版本号
 	GetAudioVersions(ctx context.Context, narrationID string) ([]int, error)
 
 	// ListAudiosByNarration 获取解说的音频列表（可指定版本；version<=0 则取最新版本）
 	ListAudiosByNarration(ctx context.Context, narrationID string, version int) ([]*novel.Audio, int, error)
+
+	// ListAudiosByChapter 获取章节的音频列表（可指定版本；version<=0 则取最新版本）
+	ListAudiosByChapter(ctx context.Context, chapterID string, version int) ([]*novel.Audio, int, error)
 }
 
 // GenerateAudiosForNarration 为章节解说生成所有章节音频片段
@@ -38,163 +45,141 @@ type AudioService interface {
 // Returns:
 //   - []string: 生成的章节音频ID列表
 //   - error: 错误信息
+//
+// GenerateAudiosForNarration 为章节解说生成所有章节音频片段
+// 注意：narration 模块已删除，此方法需要重构
 func (s *novelService) GenerateAudiosForNarration(ctx context.Context, narrationID string) ([]string, error) {
-	// 1. 从数据库获取章节解说
-	narration, err := s.narrationRepo.FindByID(ctx, narrationID)
+	// TODO: 重构此方法，不再依赖 narration
+	return nil, fmt.Errorf("narration module has been removed, this method needs to be refactored")
+}
+
+// GetAudioVersions 获取章节解说的所有音频版本号
+// 注意：narration 模块已删除，此方法暂时返回错误
+func (s *novelService) GetAudioVersions(ctx context.Context, narrationID string) ([]int, error) {
+	// TODO: 重构此方法，不再依赖 narration
+	return nil, fmt.Errorf("narration module has been removed, this method needs to be refactored")
+}
+
+// GenerateAudiosForChapter 为章节的所有 shot 生成音频
+// 基于章节的 active_scene_version 获取所有 shot，为每个 shot 的 narration 文本生成音频
+func (s *novelService) GenerateAudiosForChapter(ctx context.Context, chapterID string) ([]string, error) {
+	// 1. 获取章节信息
+	chapter, err := s.chapterRepo.FindByID(ctx, chapterID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find narration: %w", err)
+		return nil, fmt.Errorf("find chapter: %w", err)
 	}
 
-	// 2. 从独立的表中查询所有镜头（按 index 排序）
-	shots, err := s.shotRepo.FindByNarrationID(ctx, narrationID)
+	if chapter.ActiveSceneVersion == 0 {
+		return nil, fmt.Errorf("chapter has no active scene version")
+	}
+
+	// 2. 获取该版本的所有 shot
+	shots, err := s.shotRepo.FindByChapterIDAndVersion(ctx, chapterID, chapter.ActiveSceneVersion)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find shots: %w", err)
+		return nil, fmt.Errorf("find shots: %w", err)
 	}
 
 	if len(shots) == 0 {
-		return nil, fmt.Errorf("no shots found for narration")
+		return nil, fmt.Errorf("no shots found for chapter %s, version %d", chapterID, chapter.ActiveSceneVersion)
 	}
 
-	// 3. 自动生成下一个版本号（基于章节ID，独立递增）
-	audioVersion, err := s.getNextAudioVersion(ctx, narration.ChapterID, 0)
+	// 3. 获取下一个音频版本号
+	nextVersion, err := s.getNextAudioVersion(ctx, chapterID, chapter.ActiveSceneVersion)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get next audio version: %w", err)
+		return nil, fmt.Errorf("get next audio version: %w", err)
 	}
 
-	// 4. 从 Shot 表中提取所有解说文本（按 index 排序）
-	var narrationTexts []string
-	for _, shot := range shots {
-		if shot.Narration != "" {
-			narrationTexts = append(narrationTexts, shot.Narration)
+	// 4. 异步生成音频（类似图片生成）
+	go func() {
+		ctx := context.Background()
+		for _, shot := range shots {
+			_, err := s.generateAudioForShot(ctx, shot, chapter, nextVersion)
+			if err != nil {
+				log.Error().
+					Err(err).
+					Str("shot_id", shot.ID).
+					Str("chapter_id", chapterID).
+					Msg("生成音频失败")
+				continue
+			}
 		}
-	}
+	}()
 
-	if len(narrationTexts) == 0 {
-		return nil, fmt.Errorf("no narration texts found")
-	}
-
-	// 3. 为每段解说文本生成章节音频
-	textCleaner := noveltools.NewTextCleaner()
-	var audioIDs []string
-	for i, narrationText := range narrationTexts {
-		sequence := i + 1
-
-		// 清理文本用于TTS
-		cleanText := textCleaner.CleanTextForTTS(narrationText)
-		if cleanText == "" {
-			log.Warn().Int("sequence", sequence).Msg("清理后的文本为空，跳过")
-			continue
-		}
-
-		// 生成章节音频
-		audioID, err := s.generateSingleAudio(ctx, narration, sequence, cleanText, audioVersion)
-		if err != nil {
-			log.Error().Err(err).Int("sequence", sequence).Msg("生成章节音频失败")
-			return nil, fmt.Errorf("failed to generate audio for sequence %d: %w", sequence, err)
-		}
-
-		audioIDs = append(audioIDs, audioID)
-	}
-
-	return audioIDs, nil
+	// 5. 立即返回（异步执行）
+	return []string{}, nil
 }
 
-// generateSingleAudio 生成单个章节音频片段
-func (s *novelService) generateSingleAudio(
-	ctx context.Context,
-	narration *novel.Narration,
-	sequence int,
-	text string,
-	version int,
-) (string, error) {
-	// 1. 调用 TTS Provider 生成音频（1.2倍速，参考 Python 脚本）
-	speedRatio := 1.2
-	ttsResult, err := s.ttsProvider.GenerateVoiceWithTimestamps(ctx, text, speedRatio)
+// generateAudioForShot 为单个 shot 生成音频
+func (s *novelService) generateAudioForShot(ctx context.Context, shot *novel.Shot, chapter *novel.Chapter, version int) (string, error) {
+	// 检查 shot 是否有 narration 文本
+	if shot.Narration == "" {
+		return "", fmt.Errorf("shot %s has no narration text", shot.ID)
+	}
+
+	// 1. 使用 TTS 生成音频
+	ttsResult, err := s.ttsProvider.GenerateVoiceWithTimestamps(ctx, shot.Narration, 1.0)
 	if err != nil {
-		return "", fmt.Errorf("TTS generation failed: %w", err)
+		return "", fmt.Errorf("generate voice: %w", err)
 	}
 
 	if !ttsResult.Success {
 		return "", fmt.Errorf("TTS generation failed: %s", ttsResult.ErrorMessage)
 	}
 
-	// 构建 TTS 参数提示词（记录生成参数）
-	ttsPrompt := fmt.Sprintf("TTS参数: speedRatio=%.2f, textLength=%d", speedRatio, len(text))
-
-	// 2. 通过 resource 模块上传音频文件（直接使用返回的音频数据）
-	userID := narration.UserID
-	fileName := fmt.Sprintf("%s_audio_%02d.mp3", narration.ID, sequence)
-	contentType := "audio/mpeg"
-	ext := "mp3"
-
-	uploadReq := &service.UploadFileRequest{
-		UserID:      userID,
-		FileName:    fileName,
-		ContentType: contentType,
-		Ext:         ext,
+	// 2. 上传音频文件到资源服务
+	uploadReq := service.UploadFileRequest{
+		FileName:    fmt.Sprintf("audio_%s.mp3", id.New()),
+		ContentType: "audio/mpeg",
+		Ext:         "mp3",
 		Data:        bytes.NewReader(ttsResult.AudioData),
 	}
 
-	uploadResult, err := s.resourceService.UploadFile(ctx, uploadReq)
+	uploadResult, err := s.resourceService.UploadFile(ctx, &uploadReq)
 	if err != nil {
-		return "", fmt.Errorf("failed to upload audio file via resource service: %w", err)
+		return "", fmt.Errorf("upload audio: %w", err)
 	}
 
-	resourceID := uploadResult.ResourceID
-
-	// 3. 转换时间戳数据
-	charTimes := make([]novel.CharTime, 0, len(ttsResult.TimestampData.CharacterTimestamps))
-	for _, ts := range ttsResult.TimestampData.CharacterTimestamps {
-		charTimes = append(charTimes, novel.CharTime{
-			Character: ts.Character,
-			StartTime: ts.StartTime,
-			EndTime:   ts.EndTime,
-		})
-	}
-
-	// 4. 获取音频时长（使用 TTS API 返回的真实时长）
-	audioDuration := ttsResult.Duration
-	if audioDuration <= 0 {
-		// 如果 Duration 为 0，尝试从 TimestampData 获取
-		if ttsResult.TimestampData != nil && ttsResult.TimestampData.Duration > 0 {
-			audioDuration = ttsResult.TimestampData.Duration
-		} else {
-			// 降级方案：如果都获取不到，使用默认值 10 秒
-			audioDuration = 10.0
-			log.Warn().
-				Str("narration_id", narration.ID).
-				Int("sequence", sequence).
-				Msg("TTS API 返回的 duration 为 0，使用默认值 10 秒")
+	// 3. 转换时间戳
+	charTimestamps := make([]novel.CharTime, 0, len(ttsResult.TimestampData.CharacterTimestamps))
+	if ttsResult.TimestampData != nil {
+		for _, ts := range ttsResult.TimestampData.CharacterTimestamps {
+			charTimestamps = append(charTimestamps, novel.CharTime{
+				Character: ts.Character,
+				StartTime: ts.StartTime,
+				EndTime:   ts.EndTime,
+			})
 		}
 	}
 
-	// 获取章节信息以获取 novel_id
-	chapter, err := s.chapterRepo.FindByID(ctx, narration.ChapterID)
-	if err != nil {
-		return "", fmt.Errorf("find chapter: %w", err)
-	}
-
-	// 8. 创建 chapter_audio 记录
+	// 4. 创建音频记录
 	audioID := id.New()
-	audioEntity := &novel.Audio{
-		ID:          audioID,
-		NarrationID: narration.ID,
-		ChapterID:   narration.ChapterID,
-		NovelID:     chapter.NovelID,
-		UserID:      narration.UserID,
-		Sequence:        sequence,
-		AudioResourceID: resourceID,
-		Duration:        audioDuration,
-		Text:            text,
-		Timestamps:      charTimes,
-		Prompt:          ttsPrompt,
-		Version:         version, // 使用指定的版本号
+	audio := &novel.Audio{
+		ID:              audioID,
+		NovelID:         chapter.NovelID,
+		UserID:          chapter.UserID,
+		AudioType:       novel.AudioTypeShot,
+		ShotID:          shot.ID,
+		ChapterID:       chapter.ID,
+		AudioResourceID: uploadResult.ResourceID,
+		Duration:        ttsResult.Duration,
+		Text:            shot.Narration,
+		Timestamps:      charTimestamps,
+		Version:         version,
 		Status:          novel.TaskStatusCompleted,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
 	}
 
-	if err := s.audioRepo.Create(ctx, audioEntity); err != nil {
-		return "", fmt.Errorf("failed to create audio record: %w", err)
+	if err := s.audioRepo.Create(ctx, audio); err != nil {
+		return "", fmt.Errorf("create audio record: %w", err)
 	}
+
+	log.Info().
+		Str("shot_id", shot.ID).
+		Str("audio_id", audioID).
+		Str("chapter_id", chapter.ID).
+		Float64("duration", ttsResult.Duration).
+		Msg("音频生成成功")
 
 	return audioID, nil
 }
@@ -203,47 +188,93 @@ func (s *novelService) generateSingleAudio(
 // chapterID: 章节ID
 // baseVersion: 基础版本号（如 1），如果为0则自动生成下一个版本号
 func (s *novelService) getNextAudioVersion(ctx context.Context, chapterID string, baseVersion int) (int, error) {
-	versions, err := s.audioRepo.FindVersionsByChapterID(ctx, chapterID)
+	// 查询该章节已有的音频版本号
+	audios, err := s.audioRepo.FindByChapterID(ctx, chapterID)
 	if err != nil {
-		// 如果没有找到任何版本，返回 1 或基础版本号
+		// 如果查询失败，返回基础版本号
 		if baseVersion == 0 {
 			return 1, nil
 		}
 		return baseVersion, nil
 	}
 
-	if len(versions) == 0 {
-		if baseVersion == 0 {
-			return 1, nil
+	// 找到该章节的最大版本号
+	maxVersion := 0
+	for _, audio := range audios {
+		if audio.Version > maxVersion {
+			maxVersion = audio.Version
 		}
-		return baseVersion, nil
 	}
 
-	// 如果指定了基础版本号，检查该版本是否已存在
+	// 如果指定了基础版本号，使用它；否则使用最大版本号+1
 	if baseVersion > 0 {
-		for _, v := range versions {
-			if v == baseVersion {
-				// 该版本已存在，返回下一个版本号
-				maxVersion := 0
-				for _, v := range versions {
-					if v > maxVersion {
-						maxVersion = v
-					}
-				}
-				return maxVersion + 1, nil
+		if baseVersion > maxVersion {
+			return baseVersion, nil
+		}
+		return maxVersion + 1, nil
+	}
+
+	if maxVersion == 0 {
+		return 1, nil
+	}
+	return maxVersion + 1, nil
+}
+
+// ListAudiosByChapter 获取章节的音频列表（可指定版本；version<=0 则取最新版本）
+func (s *novelService) ListAudiosByChapter(ctx context.Context, chapterID string, version int) ([]*novel.Audio, int, error) {
+	// 获取该章节的所有 shot
+	shots, err := s.shotRepo.FindByChapterID(ctx, chapterID)
+	if err != nil {
+		return nil, 0, fmt.Errorf("find shots: %w", err)
+	}
+
+	if len(shots) == 0 {
+		return []*novel.Audio{}, 0, nil
+	}
+
+	// 获取所有 shot 的音频
+	allAudios := make([]*novel.Audio, 0)
+	for _, shot := range shots {
+		audios, err := s.audioRepo.FindByShotID(ctx, shot.ID)
+		if err != nil {
+			continue
+		}
+		allAudios = append(allAudios, audios...)
+	}
+
+	// 如果指定了版本，过滤版本
+	if version > 0 {
+		filtered := make([]*novel.Audio, 0)
+		for _, audio := range allAudios {
+			if audio.Version == version {
+				filtered = append(filtered, audio)
 			}
 		}
-		// 该版本不存在，直接返回
-		return baseVersion, nil
-	}
-
-	// 如果没有指定基础版本号，查找所有版本号中的最大值
-	maxVersion := 0
-	for _, v := range versions {
-		if v > maxVersion {
-			maxVersion = v
+		allAudios = filtered
+	} else {
+		// 否则取最新版本
+		// 找到最大版本号
+		maxVersion := 0
+		for _, audio := range allAudios {
+			if audio.Version > maxVersion {
+				maxVersion = audio.Version
+			}
 		}
+		// 只保留最新版本的音频
+		filtered := make([]*novel.Audio, 0)
+		for _, audio := range allAudios {
+			if audio.Version == maxVersion {
+				filtered = append(filtered, audio)
+			}
+		}
+		allAudios = filtered
 	}
 
-	return maxVersion + 1, nil
+	// 确定返回的版本号
+	returnVersion := 0
+	if len(allAudios) > 0 {
+		returnVersion = allAudios[0].Version
+	}
+
+	return allAudios, returnVersion, nil
 }

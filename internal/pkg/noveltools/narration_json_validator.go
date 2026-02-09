@@ -51,20 +51,20 @@ type NarrationJSONContent struct {
 
 // NarrationJSONCharacter 临时角色结构体
 type NarrationJSONCharacter struct {
-	Name       string `json:"name"`                  // 角色姓名
-	Gender     string `json:"gender,omitempty"`      // 性别：男/女
-	AgeGroup   string `json:"age_group,omitempty"`   // 年龄段：青年/中年/老年/青少年/儿童
-	RoleNumber string `json:"role_number,omitempty"` // 角色编号
-	Description string `json:"description,omitempty"` // 角色详细描述
+	Name        string `json:"name"`                   // 角色姓名
+	Gender      string `json:"gender,omitempty"`       // 性别：男/女
+	AgeGroup    string `json:"age_group,omitempty"`    // 年龄段：青年/中年/老年/青少年/儿童
+	RoleNumber  string `json:"role_number,omitempty"`  // 角色编号
+	Description string `json:"description,omitempty"`  // 角色详细描述
 	ImagePrompt string `json:"image_prompt,omitempty"` // 角色图片提示词
 }
 
 // NarrationJSONProp 临时道具结构体
 type NarrationJSONProp struct {
-	Name        string `json:"name"`                  // 道具名称
-	Description string `json:"description,omitempty"` // 道具详细描述
+	Name        string `json:"name"`                   // 道具名称
+	Description string `json:"description,omitempty"`  // 道具详细描述
 	ImagePrompt string `json:"image_prompt,omitempty"` // 道具图片提示词
-	Category    string `json:"category,omitempty"`    // 道具类别（如：武器、法器、丹药等）
+	Category    string `json:"category,omitempty"`     // 道具类别（如：武器、法器、丹药等）
 }
 
 // NarrationJSONScene 临时场景结构体
@@ -78,15 +78,16 @@ type NarrationJSONScene struct {
 
 // NarrationJSONShot 临时镜头结构体
 type NarrationJSONShot struct {
-	CloseupNumber  string  `json:"closeup_number"`            // 镜头编号
-	Character      string  `json:"character"`                 // 角色名称
-	Image          string  `json:"image"`                     // 画面描述
-	Narration      string  `json:"narration"`                 // 旁白
-	SoundEffect    string  `json:"sound_effect,omitempty"`    // 音效描述
-	Duration       float64 `json:"duration,omitempty"`        // 时长（秒）
-	ImagePrompt    string  `json:"image_prompt"`              // 镜头图片提示词
-	VideoPrompt    string  `json:"video_prompt"`              // 镜头视频提示词
-	CameraMovement string  `json:"camera_movement,omitempty"` // 运镜方式
+	CloseupNumber    string  `json:"closeup_number"`            // 镜头编号
+	Character        string  `json:"character"`                 // 角色名称
+	Image            string  `json:"image,omitempty"`           // 画面描述（已废弃，保留兼容）
+	Narration        string  `json:"narration"`                 // 旁白
+	SoundEffect      string  `json:"sound_effect,omitempty"`    // 音效描述
+	Duration         float64 `json:"duration,omitempty"`        // 时长（秒）
+	FirstImagePrompt string  `json:"first_image_prompt"`        // 首图提示词
+	LastImagePrompt  string  `json:"last_image_prompt"`         // 末图提示词
+	VideoPrompt      string  `json:"video_prompt"`              // 镜头视频提示词
+	CameraMovement   string  `json:"camera_movement,omitempty"` // 运镜方式
 }
 
 // ValidateNarrationJSON 验证 JSON 格式的解说文案

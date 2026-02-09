@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/rs/zerolog/log"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -16,13 +17,12 @@ type SceneRepository interface {
 	Create(ctx context.Context, scene *novel.Scene) error
 	CreateMany(ctx context.Context, scenes []*novel.Scene) error
 	FindByID(ctx context.Context, id string) (*novel.Scene, error)
-	FindByNarrationID(ctx context.Context, narrationID string) ([]*novel.Scene, error)
-	FindByNarrationIDAndVersion(ctx context.Context, narrationID string, version int) ([]*novel.Scene, error)
 	FindByChapterID(ctx context.Context, chapterID string) ([]*novel.Scene, error)
+	FindByChapterIDAndVersion(ctx context.Context, chapterID string, version int) ([]*novel.Scene, error)
 	Update(ctx context.Context, id string, updates map[string]interface{}) error
 	UpdateStatus(ctx context.Context, id string, status novel.TaskStatus, errorMessage string) error
 	Delete(ctx context.Context, id string) error
-	DeleteByNarrationID(ctx context.Context, narrationID string) error
+	DeleteByNovelID(ctx context.Context, novelID string) error
 }
 
 // SceneRepo 场景仓库实现
@@ -44,9 +44,6 @@ func (r *SceneRepo) Create(ctx context.Context, scene *novel.Scene) error {
 	if scene.Status == "" || scene.Status == novel.TaskStatus("") {
 		scene.Status = novel.TaskStatusCompleted
 	}
-	if scene.Version == 0 {
-		scene.Version = 1
-	}
 	_, err := r.coll.InsertOne(ctx, scene)
 	return err
 }
@@ -62,10 +59,7 @@ func (r *SceneRepo) CreateMany(ctx context.Context, scenes []*novel.Scene) error
 		scene.CreatedAt = now
 		scene.UpdatedAt = now
 		if scene.Status == "" {
-			scene.Status = "completed"
-		}
-		if scene.Version == 0 {
-			scene.Version = 1
+			scene.Status = novel.TaskStatusCompleted
 		}
 		docs[i] = scene
 	}
@@ -82,52 +76,52 @@ func (r *SceneRepo) FindByID(ctx context.Context, id string) (*novel.Scene, erro
 	return &scene, nil
 }
 
-// FindByNarrationID 根据解说ID查询所有场景（按sequence排序）
-func (r *SceneRepo) FindByNarrationID(ctx context.Context, narrationID string) ([]*novel.Scene, error) {
-	filter := bson.M{"narration_id": narrationID, "deleted_at": nil}
-	opts := options.Find().SetSort(bson.M{"sequence": 1})
-	cur, err := r.coll.Find(ctx, filter, opts)
-	if err != nil {
-		return nil, err
-	}
-	defer cur.Close(ctx)
-
-	var scenes []*novel.Scene
-	if err := cur.All(ctx, &scenes); err != nil {
-		return nil, err
-	}
-	return scenes, nil
-}
-
-// FindByNarrationIDAndVersion 根据解说ID和版本号查询场景
-func (r *SceneRepo) FindByNarrationIDAndVersion(ctx context.Context, narrationID string, version int) ([]*novel.Scene, error) {
-	filter := bson.M{"narration_id": narrationID, "version": version, "deleted_at": nil}
-	opts := options.Find().SetSort(bson.M{"sequence": 1})
-	cur, err := r.coll.Find(ctx, filter, opts)
-	if err != nil {
-		return nil, err
-	}
-	defer cur.Close(ctx)
-
-	var scenes []*novel.Scene
-	if err := cur.All(ctx, &scenes); err != nil {
-		return nil, err
-	}
-	return scenes, nil
-}
-
-// FindByChapterID 根据章节ID查询所有场景
+// FindByChapterID 根据章节ID查询所有场景（查询所有版本）
 func (r *SceneRepo) FindByChapterID(ctx context.Context, chapterID string) ([]*novel.Scene, error) {
 	filter := bson.M{"chapter_id": chapterID, "deleted_at": nil}
-	opts := options.Find().SetSort(bson.M{"sequence": 1})
+	opts := options.Find().SetSort(bson.D{
+		{Key: "version", Value: -1},
+		{Key: "sequence", Value: 1},
+	})
 	cur, err := r.coll.Find(ctx, filter, opts)
 	if err != nil {
+		log.Error().Err(err).
+			Str("chapter_id", chapterID).
+			Msg("查询场景列表失败")
 		return nil, err
 	}
 	defer cur.Close(ctx)
 
 	var scenes []*novel.Scene
 	if err := cur.All(ctx, &scenes); err != nil {
+		log.Error().Err(err).
+			Str("chapter_id", chapterID).
+			Msg("解析场景列表失败")
+		return nil, err
+	}
+	return scenes, nil
+}
+
+// FindByChapterIDAndVersion 根据章节ID和版本号查询场景
+func (r *SceneRepo) FindByChapterIDAndVersion(ctx context.Context, chapterID string, version int) ([]*novel.Scene, error) {
+	filter := bson.M{"chapter_id": chapterID, "version": version, "deleted_at": nil}
+	opts := options.Find().SetSort(bson.M{"sequence": 1})
+	cur, err := r.coll.Find(ctx, filter, opts)
+	if err != nil {
+		log.Error().Err(err).
+			Str("chapter_id", chapterID).
+			Int("version", version).
+			Msg("按版本查询场景列表失败")
+		return nil, err
+	}
+	defer cur.Close(ctx)
+
+	var scenes []*novel.Scene
+	if err := cur.All(ctx, &scenes); err != nil {
+		log.Error().Err(err).
+			Str("chapter_id", chapterID).
+			Int("version", version).
+			Msg("解析场景列表失败")
 		return nil, err
 	}
 	return scenes, nil
@@ -176,11 +170,11 @@ func (r *SceneRepo) Delete(ctx context.Context, id string) error {
 	return err
 }
 
-// DeleteByNarrationID 根据解说ID软删除所有场景
-func (r *SceneRepo) DeleteByNarrationID(ctx context.Context, narrationID string) error {
+// DeleteByNovelID 根据小说ID删除所有场景（软删除）
+func (r *SceneRepo) DeleteByNovelID(ctx context.Context, novelID string) error {
 	_, err := r.coll.UpdateMany(
 		ctx,
-		bson.M{"narration_id": narrationID, "deleted_at": nil},
+		bson.M{"novel_id": novelID, "deleted_at": nil},
 		bson.M{"$set": bson.M{
 			"deleted_at": time.Now(),
 			"updated_at": time.Now(),

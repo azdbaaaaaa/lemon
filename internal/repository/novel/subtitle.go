@@ -15,14 +15,11 @@ import (
 type SubtitleRepository interface {
 	Create(ctx context.Context, s *novel.Subtitle) error
 	FindByID(ctx context.Context, id string) (*novel.Subtitle, error)
-	FindByChapterID(ctx context.Context, chapterID string) (*novel.Subtitle, error)
-	FindByNarrationID(ctx context.Context, narrationID string) ([]*novel.Subtitle, error)
-	FindByNarrationIDAndVersion(ctx context.Context, narrationID string, version int) ([]*novel.Subtitle, error)
-	FindByNarrationIDAndSequence(ctx context.Context, narrationID string, sequence int) (*novel.Subtitle, error)
-	FindByChapterIDAndVersion(ctx context.Context, chapterID string, version int) (*novel.Subtitle, error)
-	FindVersionsByChapterID(ctx context.Context, chapterID string) ([]int, error)
+	FindByShotID(ctx context.Context, shotID string) ([]*novel.Subtitle, error)                                                                  // 查询分镜字幕
+	FindByNovelIDAndType(ctx context.Context, novelID string, subtitleType novel.SubtitleType) ([]*novel.Subtitle, error)                        // 查询完整字幕
+	FindByShotIDAndTypeAndVersion(ctx context.Context, shotID string, subtitleType novel.SubtitleType, version int) ([]*novel.Subtitle, error)   // 查询分镜字幕（指定版本）
+	FindByNovelIDAndTypeAndVersion(ctx context.Context, novelID string, subtitleType novel.SubtitleType, version int) ([]*novel.Subtitle, error) // 查询完整字幕（指定版本）
 	UpdateStatus(ctx context.Context, id string, status novel.TaskStatus) error
-	UpdateVersion(ctx context.Context, id string, version int) error
 	Delete(ctx context.Context, id string) error
 }
 
@@ -64,42 +61,10 @@ func (r *SubtitleRepo) FindByID(ctx context.Context, id string) (*novel.Subtitle
 	return &s, nil
 }
 
-// FindByChapterID 根据章节ID查询字幕（返回最新的未删除的）
-func (r *SubtitleRepo) FindByChapterID(ctx context.Context, chapterID string) (*novel.Subtitle, error) {
-	var s novel.Subtitle
-	filter := bson.M{"chapter_id": chapterID, "deleted_at": nil}
-	opts := options.FindOne().SetSort(bson.M{"created_at": -1})
-	if err := r.coll.FindOne(ctx, filter, opts).Decode(&s); err != nil {
-		return nil, err
-	}
-	return &s, nil
-}
-
-// FindByNarrationID 根据解说ID查询所有字幕（按 sequence 排序）
-func (r *SubtitleRepo) FindByNarrationID(ctx context.Context, narrationID string) ([]*novel.Subtitle, error) {
-	filter := bson.M{"narration_id": narrationID, "deleted_at": nil}
-	opts := options.Find().SetSort(bson.M{"sequence": 1})
-	cur, err := r.coll.Find(ctx, filter, opts)
-	if err != nil {
-		return nil, err
-	}
-	defer cur.Close(ctx)
-
-	var subtitles []*novel.Subtitle
-	for cur.Next(ctx) {
-		var s novel.Subtitle
-		if err := cur.Decode(&s); err != nil {
-			continue
-		}
-		subtitles = append(subtitles, &s)
-	}
-	return subtitles, nil
-}
-
-// FindByNarrationIDAndVersion 根据解说ID和版本号查询所有字幕（按 sequence 排序）
-func (r *SubtitleRepo) FindByNarrationIDAndVersion(ctx context.Context, narrationID string, version int) ([]*novel.Subtitle, error) {
-	filter := bson.M{"narration_id": narrationID, "version": version, "deleted_at": nil}
-	opts := options.Find().SetSort(bson.M{"sequence": 1})
+// FindByShotID 查询分镜字幕（按创建时间排序）
+func (r *SubtitleRepo) FindByShotID(ctx context.Context, shotID string) ([]*novel.Subtitle, error) {
+	filter := bson.M{"shot_id": shotID, "subtitle_type": novel.SubtitleTypeShot, "deleted_at": nil}
+	opts := options.Find().SetSort(bson.M{"created_at": -1})
 	cur, err := r.coll.Find(ctx, filter, opts)
 	if err != nil {
 		return nil, err
@@ -113,59 +78,65 @@ func (r *SubtitleRepo) FindByNarrationIDAndVersion(ctx context.Context, narratio
 	return subtitles, nil
 }
 
-// FindByNarrationIDAndSequence 根据解说ID和序号查询字幕
-func (r *SubtitleRepo) FindByNarrationIDAndSequence(ctx context.Context, narrationID string, sequence int) (*novel.Subtitle, error) {
-	var s novel.Subtitle
-	filter := bson.M{"narration_id": narrationID, "sequence": sequence, "deleted_at": nil}
-	opts := options.FindOne().SetSort(bson.M{"created_at": -1})
-	if err := r.coll.FindOne(ctx, filter, opts).Decode(&s); err != nil {
-		return nil, err
-	}
-	return &s, nil
-}
-
-// FindByChapterIDAndVersion 根据章节ID和版本号查询字幕
-func (r *SubtitleRepo) FindByChapterIDAndVersion(ctx context.Context, chapterID string, version int) (*novel.Subtitle, error) {
-	var s novel.Subtitle
-	filter := bson.M{"chapter_id": chapterID, "version": version, "deleted_at": nil}
-	opts := options.FindOne().SetSort(bson.M{"created_at": -1})
-	if err := r.coll.FindOne(ctx, filter, opts).Decode(&s); err != nil {
-		return nil, err
-	}
-	return &s, nil
-}
-
-// FindVersionsByChapterID 查询章节的所有版本号
-func (r *SubtitleRepo) FindVersionsByChapterID(ctx context.Context, chapterID string) ([]int, error) {
-	filter := bson.M{"chapter_id": chapterID, "deleted_at": nil}
-	opts := options.Find().SetProjection(bson.M{"version": 1}).SetSort(bson.M{"created_at": -1})
+// FindByNovelIDAndType 查询完整字幕（按创建时间排序）
+func (r *SubtitleRepo) FindByNovelIDAndType(ctx context.Context, novelID string, subtitleType novel.SubtitleType) ([]*novel.Subtitle, error) {
+	filter := bson.M{"novel_id": novelID, "subtitle_type": subtitleType, "deleted_at": nil}
+	opts := options.Find().SetSort(bson.M{"created_at": -1})
 	cur, err := r.coll.Find(ctx, filter, opts)
 	if err != nil {
 		return nil, err
 	}
 	defer cur.Close(ctx)
 
-	var versions []int
-	versionSet := make(map[int]bool)
-	for cur.Next(ctx) {
-		var doc bson.M
-		if err := cur.Decode(&doc); err != nil {
-			continue
-		}
-		if version, ok := doc["version"].(int32); ok && version > 0 {
-			v := int(version)
-			if !versionSet[v] {
-				versions = append(versions, v)
-				versionSet[v] = true
-			}
-		} else if version, ok := doc["version"].(int); ok && version > 0 {
-			if !versionSet[version] {
-				versions = append(versions, version)
-				versionSet[version] = true
-			}
-		}
+	var subtitles []*novel.Subtitle
+	if err := cur.All(ctx, &subtitles); err != nil {
+		return nil, err
 	}
-	return versions, nil
+	return subtitles, nil
+}
+
+// FindByShotIDAndTypeAndVersion 查询分镜字幕（指定版本）
+func (r *SubtitleRepo) FindByShotIDAndTypeAndVersion(ctx context.Context, shotID string, subtitleType novel.SubtitleType, version int) ([]*novel.Subtitle, error) {
+	filter := bson.M{
+		"shot_id":       shotID,
+		"subtitle_type": subtitleType,
+		"version":       version,
+		"deleted_at":    nil,
+	}
+	opts := options.Find().SetSort(bson.M{"created_at": -1})
+	cur, err := r.coll.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+
+	var subtitles []*novel.Subtitle
+	if err := cur.All(ctx, &subtitles); err != nil {
+		return nil, err
+	}
+	return subtitles, nil
+}
+
+// FindByNovelIDAndTypeAndVersion 查询完整字幕（指定版本）
+func (r *SubtitleRepo) FindByNovelIDAndTypeAndVersion(ctx context.Context, novelID string, subtitleType novel.SubtitleType, version int) ([]*novel.Subtitle, error) {
+	filter := bson.M{
+		"novel_id":      novelID,
+		"subtitle_type": subtitleType,
+		"version":       version,
+		"deleted_at":    nil,
+	}
+	opts := options.Find().SetSort(bson.M{"created_at": -1})
+	cur, err := r.coll.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+
+	var subtitles []*novel.Subtitle
+	if err := cur.All(ctx, &subtitles); err != nil {
+		return nil, err
+	}
+	return subtitles, nil
 }
 
 // UpdateStatus 更新字幕状态
@@ -175,19 +146,6 @@ func (r *SubtitleRepo) UpdateStatus(ctx context.Context, id string, status novel
 		bson.M{"id": id},
 		bson.M{"$set": bson.M{
 			"status":     status,
-			"updated_at": time.Now(),
-		}},
-	)
-	return err
-}
-
-// UpdateVersion 更新字幕版本号
-func (r *SubtitleRepo) UpdateVersion(ctx context.Context, id string, version int) error {
-	_, err := r.coll.UpdateOne(
-		ctx,
-		bson.M{"id": id},
-		bson.M{"$set": bson.M{
-			"version":    version,
 			"updated_at": time.Now(),
 		}},
 	)

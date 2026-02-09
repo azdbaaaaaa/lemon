@@ -124,3 +124,71 @@ func (h *Handler) GetAudioVersions(c *gin.Context) {
 		},
 	})
 }
+
+// GenerateAudiosForChapterRequest 为章节生成音频请求
+type GenerateAudiosForChapterRequest struct {
+	ChapterID string `json:"chapter_id" uri:"chapter_id" binding:"required"` // 章节ID（必填）
+}
+
+// GenerateAudiosForChapterResponseData 为章节生成音频响应数据
+type GenerateAudiosForChapterResponseData struct {
+	ChapterID string `json:"chapter_id"` // 章节ID
+	Message   string `json:"message"`     // 提示信息
+}
+
+// GenerateAudiosForChapter 为章节的所有 shot 生成音频
+// @Summary      生成章节音频
+// @Description  为章节的所有 shot 生成音频，基于章节的 active_scene_version 获取所有 shot，为每个 shot 的 narration 文本生成音频。音频生成是异步的，提交任务后需要通过状态查询接口轮询进度。
+// @Tags         音频生成
+// @Accept       json
+// @Produce      json
+// @Param        chapter_id  path      string  true  "章节ID"
+// @Success      200         {object}  map[string]interface{}  "成功响应"
+// @Failure      400         {object}  ErrorResponse  "请求参数错误"
+// @Failure      500         {object}  ErrorResponse  "服务器内部错误"
+// @Router       /api/v1/chapters/{chapter_id}/audios [post]
+func (h *Handler) GenerateAudiosForChapter(c *gin.Context) {
+	var req GenerateAudiosForChapterRequest
+	if err := c.ShouldBindUri(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Code:    40001,
+			Message: "Invalid chapter_id",
+			Detail:  err.Error(),
+		})
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	// 调用Service层
+	_, err := h.novelService.GenerateAudiosForChapter(ctx, req.ChapterID)
+	if err != nil {
+		code := http.StatusInternalServerError
+		errorCode := 50001
+
+		// 根据错误类型设置错误码
+		switch {
+		case err.Error() == "chapter has no active scene version":
+			code = http.StatusBadRequest
+			errorCode = 40002
+		case err.Error() == "no shots found for chapter":
+			code = http.StatusBadRequest
+			errorCode = 40003
+		}
+
+		c.JSON(code, ErrorResponse{
+			Code:    errorCode,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "音频生成任务已提交",
+		"data": GenerateAudiosForChapterResponseData{
+			ChapterID: req.ChapterID,
+			Message:   "音频生成任务已启动，请通过状态查询接口获取进度",
+		},
+	})
+}

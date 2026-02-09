@@ -15,6 +15,8 @@ import (
 type NovelRepository interface {
 	Create(ctx context.Context, novel *novel.Novel) error
 	FindByID(ctx context.Context, id string) (*novel.Novel, error)
+	Update(ctx context.Context, id string, updates bson.M) error
+	List(ctx context.Context, page, pageSize int64) ([]*novel.Novel, int64, error)
 	ListByUser(ctx context.Context, userID string, page, pageSize int64) ([]*novel.Novel, int64, error)
 }
 
@@ -47,22 +49,62 @@ func (r *NovelRepo) FindByID(ctx context.Context, id string) (*novel.Novel, erro
 	return &n, nil
 }
 
-// ListByUser 根据用户ID查询小说列表（分页）
-func (r *NovelRepo) ListByUser(ctx context.Context, userID string, page, pageSize int64) ([]*novel.Novel, int64, error) {
-	filter := bson.M{"user_id": userID, "deleted_at": nil}
-	
+// Update 更新小说信息
+func (r *NovelRepo) Update(ctx context.Context, id string, updates bson.M) error {
+	updates["updated_at"] = time.Now()
+	_, err := r.coll.UpdateOne(
+		ctx,
+		bson.M{"id": id, "deleted_at": nil},
+		bson.M{"$set": updates},
+	)
+	return err
+}
+
+// List 查询所有小说列表（分页，不按用户隔离）
+func (r *NovelRepo) List(ctx context.Context, page, pageSize int64) ([]*novel.Novel, int64, error) {
+	filter := bson.M{"deleted_at": nil}
+
 	// 计算总数
 	total, err := r.coll.CountDocuments(ctx, filter)
 	if err != nil {
 		return nil, 0, err
 	}
-	
+
 	// 分页查询
 	opts := options.Find().
 		SetSort(bson.M{"created_at": -1}).
 		SetSkip((page - 1) * pageSize).
 		SetLimit(pageSize)
-	
+
+	cur, err := r.coll.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer cur.Close(ctx)
+
+	var novels []*novel.Novel
+	if err := cur.All(ctx, &novels); err != nil {
+		return nil, 0, err
+	}
+	return novels, total, nil
+}
+
+// ListByUser 根据用户ID查询小说列表（分页）
+func (r *NovelRepo) ListByUser(ctx context.Context, userID string, page, pageSize int64) ([]*novel.Novel, int64, error) {
+	filter := bson.M{"user_id": userID, "deleted_at": nil}
+
+	// 计算总数
+	total, err := r.coll.CountDocuments(ctx, filter)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// 分页查询
+	opts := options.Find().
+		SetSort(bson.M{"created_at": -1}).
+		SetSkip((page - 1) * pageSize).
+		SetLimit(pageSize)
+
 	cur, err := r.coll.Find(ctx, filter, opts)
 	if err != nil {
 		return nil, 0, err

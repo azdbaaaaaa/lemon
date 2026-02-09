@@ -61,7 +61,7 @@ func (h *Handler) GetVideosByStatus(c *gin.Context) {
 		"code":    0,
 		"message": "success",
 		"data": GetVideosByStatusResponseData{
-			Videos: toVideoInfoList(videos),
+			Videos: toVideoInfoList(ctx, videos, h.resourceService),
 			Count:  len(videos),
 			Status: req.Status,
 		},

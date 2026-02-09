@@ -257,6 +257,295 @@
                 }
             }
         },
+        "/api/v1/chapters": {
+            "get": {
+                "description": "根据小说ID获取该小说的所有章节列表，按序号排序",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "内容管理"
+                ],
+                "summary": "获取章节列表",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "小说ID",
+                        "name": "novel_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"success\\\", \\\"data\\\": {\\\"novel_id\\\": \\\"...\\\", \\\"chapters\\\": [...], \\\"count\\\": 10}}",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器内部错误",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/chapters/split": {
+            "post": {
+                "description": "根据小说内容切分章节，将小说文本按照目标章节数切分成多个章节。这是小说处理流程的第二步。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "内容管理"
+                ],
+                "summary": "切分章节",
+                "parameters": [
+                    {
+                        "description": "切分章节请求",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/content.SplitChaptersRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"章节切分成功\\\", \\\"data\\\": {\\\"novel_id\\\": \\\"...\\\", \\\"target_chapters\\\": 10, \\\"message\\\": \\\"已切分为 10 个章节\\\"}}",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器内部错误",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/characters": {
+            "get": {
+                "description": "获取小说的所有角色列表。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "内容管理"
+                ],
+                "summary": "获取角色列表",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "小说ID",
+                        "name": "novel_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"获取成功\\\", \\\"data\\\": [...]}",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器内部错误",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/characters/detail": {
+            "get": {
+                "description": "根据名称获取角色信息。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "内容管理"
+                ],
+                "summary": "获取角色信息",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "小说ID",
+                        "name": "novel_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "角色名称",
+                        "name": "name",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"获取成功\\\", \\\"data\\\": {...}}",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "角色不存在",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器内部错误",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/characters/images": {
+            "post": {
+                "description": "为小说的所有角色生成图片（抽卡）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "内容管理"
+                ],
+                "summary": "生成角色图片",
+                "parameters": [
+                    {
+                        "description": "生成角色图片请求",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/content.GenerateCharacterImagesRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功响应",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器内部错误",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/characters/sync": {
+            "post": {
+                "description": "从章节解说同步角色信息到小说级别，提取解说中的角色信息并保存到角色表。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "内容管理"
+                ],
+                "summary": "同步角色信息",
+                "parameters": [
+                    {
+                        "description": "同步角色请求",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/content.SyncCharactersRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"角色同步成功\\\", \\\"data\\\": {...}}",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器内部错误",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/narrations/{narration_id}/audios": {
             "get": {
                 "responses": {}
@@ -398,96 +687,6 @@
                 }
             }
         },
-        "/api/v1/narrations/{narration_id}/scenes": {
-            "get": {
-                "description": "根据 narration_id 获取场景列表（按 sequence 排序）",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "解说管理"
-                ],
-                "summary": "获取解说场景列表",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "解说ID",
-                        "name": "narration_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "成功响应",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "请求参数错误",
-                        "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "服务器内部错误",
-                        "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/narrations/{narration_id}/shots": {
-            "get": {
-                "description": "根据 narration_id 获取镜头列表（按 index 排序）",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "解说管理"
-                ],
-                "summary": "获取解说镜头列表",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "解说ID",
-                        "name": "narration_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "成功响应",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "请求参数错误",
-                        "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "服务器内部错误",
-                        "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/api/v1/narrations/{narration_id}/subtitles": {
             "get": {
                 "responses": {}
@@ -536,9 +735,9 @@
                 }
             }
         },
-        "/api/v1/narrations/{narration_id}/version": {
-            "put": {
-                "description": "设置章节解说的版本号。",
+        "/api/v1/novels": {
+            "get": {
+                "description": "根据当前用户获取剧本列表（分页）",
                 "consumes": [
                     "application/json"
                 ],
@@ -546,23 +745,26 @@
                     "application/json"
                 ],
                 "tags": [
-                    "解说管理"
+                    "内容管理"
                 ],
-                "summary": "设置解说版本号",
+                "summary": "获取剧本列表",
                 "parameters": [
                     {
-                        "description": "设置版本请求",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/novel.SetNarrationVersionRequest"
-                        }
+                        "type": "integer",
+                        "description": "页码，默认1",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量，默认10",
+                        "name": "page_size",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"版本号设置成功\\\"}",
+                        "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"success\\\", \\\"data\\\": {\\\"novels\\\": [...], \\\"total\\\": 100, \\\"page\\\": 1, \\\"page_size\\\": 10}}",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -571,21 +773,19 @@
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
+                            "$ref": "#/definitions/http.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "服务器内部错误",
                         "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
+                            "$ref": "#/definitions/http.ErrorResponse"
                         }
                     }
                 }
-            }
-        },
-        "/api/v1/novels": {
+            },
             "post": {
-                "description": "根据资源ID创建小说，返回小说ID。这是小说处理流程的第一步。",
+                "description": "根据资源ID创建剧本，返回剧本ID。这是剧本处理流程的第一步。",
                 "consumes": [
                     "application/json"
                 ],
@@ -593,23 +793,23 @@
                     "application/json"
                 ],
                 "tags": [
-                    "小说管理"
+                    "内容管理"
                 ],
-                "summary": "创建小说",
+                "summary": "创建剧本",
                 "parameters": [
                     {
-                        "description": "创建小说请求",
+                        "description": "创建剧本请求",
                         "name": "request",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/novel.CreateNovelRequest"
+                            "$ref": "#/definitions/content.CreateNovelRequest"
                         }
                     }
                 ],
                 "responses": {
                     "201": {
-                        "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"小说创建成功\\\", \\\"data\\\": {\\\"novel_id\\\": \\\"...\\\"}}",
+                        "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"剧本创建成功\\\", \\\"data\\\": {\\\"novel_id\\\": \\\"...\\\"}}",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -618,13 +818,13 @@
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
+                            "$ref": "#/definitions/http.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "服务器内部错误",
                         "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
+                            "$ref": "#/definitions/http.ErrorResponse"
                         }
                     }
                 }
@@ -655,302 +855,6 @@
                 "responses": {
                     "200": {
                         "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"获取成功\\\", \\\"data\\\": {\\\"chapter_id\\\": \\\"...\\\", \\\"versions\\\": [1, 2, 3]}}",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "请求参数错误",
-                        "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "服务器内部错误",
-                        "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/novels/chapters/{chapter_id}/narration": {
-            "get": {
-                "description": "根据章节ID获取章节解说，返回最新版本的解说信息。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "解说管理"
-                ],
-                "summary": "获取章节解说",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "章节ID",
-                        "name": "chapter_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"获取成功\\\", \\\"data\\\": {...}}",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "请求参数错误",
-                        "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "解说不存在",
-                        "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "服务器内部错误",
-                        "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "description": "为单一章节生成解说文本，返回JSON格式的解说内容。解说内容会保存到数据库，包括场景和镜头信息。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "解说管理"
-                ],
-                "summary": "生成章节解说",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "章节ID",
-                        "name": "chapter_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"解说生成成功\\\", \\\"data\\\": {\\\"narration_text\\\": \\\"...\\\", \\\"chapter_id\\\": \\\"...\\\"}}",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "请求参数错误",
-                        "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "服务器内部错误",
-                        "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/novels/chapters/{chapter_id}/narration/manual": {
-            "post": {
-                "description": "人工提交解说 JSON 文本，服务端解析/校验并生成新的解说版本（写入 narrations/scenes/shots）",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "解说管理"
-                ],
-                "summary": "人工提交解说并生成新版本",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "章节ID",
-                        "name": "chapter_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "请求体",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/novel.ManualNarrationRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "成功响应",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "请求参数错误",
-                        "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "服务器内部错误",
-                        "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/novels/chapters/{chapter_id}/narration/version/{version}": {
-            "get": {
-                "description": "根据章节ID和版本号获取指定版本的章节解说信息。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "解说管理"
-                ],
-                "summary": "获取指定版本的章节解说",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "章节ID",
-                        "name": "chapter_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "integer",
-                        "description": "版本号",
-                        "name": "version",
-                        "in": "query",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"获取成功\\\", \\\"data\\\": {...}}",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "请求参数错误",
-                        "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "解说不存在",
-                        "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "服务器内部错误",
-                        "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/novels/chapters/{chapter_id}/narration/versions": {
-            "get": {
-                "description": "获取章节的所有解说版本号列表。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "解说管理"
-                ],
-                "summary": "获取章节解说版本列表",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "章节ID",
-                        "name": "chapter_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"获取成功\\\", \\\"data\\\": {\\\"chapter_id\\\": \\\"...\\\", \\\"versions\\\": [1, 2, 3]}}",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "请求参数错误",
-                        "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "服务器内部错误",
-                        "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/novels/chapters/{chapter_id}/narrations": {
-            "get": {
-                "description": "列出指定章节的所有解说版本（包含 narration_id、version、prompt、status）",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "解说管理"
-                ],
-                "summary": "列出章节解说版本",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "章节ID",
-                        "name": "chapter_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "成功响应",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -1156,9 +1060,9 @@
                 }
             }
         },
-        "/api/v1/novels/{novel_id}": {
+        "/api/v1/novels/detail": {
             "get": {
-                "description": "根据小说ID获取小说的详细信息",
+                "description": "根据剧本ID获取剧本的详细信息",
                 "consumes": [
                     "application/json"
                 ],
@@ -1166,15 +1070,15 @@
                     "application/json"
                 ],
                 "tags": [
-                    "小说管理"
+                    "内容管理"
                 ],
-                "summary": "获取小说信息",
+                "summary": "获取剧本信息",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "小说ID",
+                        "description": "剧本ID",
                         "name": "novel_id",
-                        "in": "path",
+                        "in": "query",
                         "required": true
                     }
                 ],
@@ -1189,72 +1093,27 @@
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
+                            "$ref": "#/definitions/http.ErrorResponse"
                         }
                     },
                     "404": {
-                        "description": "小说不存在",
+                        "description": "剧本不存在",
                         "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
+                            "$ref": "#/definitions/http.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "服务器内部错误",
                         "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
+                            "$ref": "#/definitions/http.ErrorResponse"
                         }
                     }
                 }
             }
         },
-        "/api/v1/novels/{novel_id}/chapters": {
-            "get": {
-                "description": "根据小说ID获取该小说的所有章节列表，按序号排序",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "章节管理"
-                ],
-                "summary": "获取章节列表",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "小说ID",
-                        "name": "novel_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"success\\\", \\\"data\\\": {\\\"novel_id\\\": \\\"...\\\", \\\"chapters\\\": [...], \\\"count\\\": 10}}",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "请求参数错误",
-                        "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "服务器内部错误",
-                        "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/novels/{novel_id}/chapters/narration": {
+        "/api/v1/props/images": {
             "post": {
-                "description": "并发地为小说的所有章节生成解说文本。这是一个异步操作，会为每个章节生成解说并保存到数据库。",
+                "description": "为小说的所有道具生成图片（抽卡）",
                 "consumes": [
                     "application/json"
                 ],
@@ -1262,68 +1121,23 @@
                     "application/json"
                 ],
                 "tags": [
-                    "解说管理"
+                    "内容管理"
                 ],
-                "summary": "为所有章节生成解说",
+                "summary": "生成道具图片",
                 "parameters": [
                     {
-                        "type": "string",
-                        "description": "小说ID",
-                        "name": "novel_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"所有章节解说生成任务已提交\\\", \\\"data\\\": {\\\"novel_id\\\": \\\"...\\\", \\\"message\\\": \\\"...\\\"}}",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "请求参数错误",
-                        "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "服务器内部错误",
-                        "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/novels/{novel_id}/chapters/split": {
-            "post": {
-                "description": "根据小说内容切分章节，将小说文本按照目标章节数切分成多个章节。这是小说处理流程的第二步。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "章节管理"
-                ],
-                "summary": "切分章节",
-                "parameters": [
-                    {
-                        "description": "切分章节请求",
+                        "description": "生成道具图片请求",
                         "name": "request",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/novel.SplitChaptersRequest"
+                            "$ref": "#/definitions/content.GeneratePropImagesRequest"
                         }
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"章节切分成功\\\", \\\"data\\\": {\\\"novel_id\\\": \\\"...\\\", \\\"target_chapters\\\": 10, \\\"message\\\": \\\"已切分为 10 个章节\\\"}}",
+                        "description": "成功响应",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -1332,163 +1146,13 @@
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
+                            "$ref": "#/definitions/http.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "服务器内部错误",
                         "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/novels/{novel_id}/characters": {
-            "get": {
-                "description": "获取小说的所有角色列表。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "角色管理"
-                ],
-                "summary": "获取小说角色列表",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "小说ID",
-                        "name": "novel_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"获取成功\\\", \\\"data\\\": [...]}",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "请求参数错误",
-                        "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "服务器内部错误",
-                        "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/novels/{novel_id}/characters/sync": {
-            "post": {
-                "description": "从章节解说同步角色信息到小说级别，提取解说中的角色信息并保存到角色表。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "角色管理"
-                ],
-                "summary": "同步角色信息",
-                "parameters": [
-                    {
-                        "description": "同步角色请求",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/novel.SyncCharactersRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"角色同步成功\\\", \\\"data\\\": {...}}",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "请求参数错误",
-                        "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "服务器内部错误",
-                        "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/novels/{novel_id}/characters/{name}": {
-            "get": {
-                "description": "根据名称获取角色信息。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "角色管理"
-                ],
-                "summary": "获取角色信息",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "小说ID",
-                        "name": "novel_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "角色名称",
-                        "name": "name",
-                        "in": "query",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "成功响应\"  \"{\\\"code\\\": 0, \\\"message\\\": \\\"获取成功\\\", \\\"data\\\": {...}}",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "请求参数错误",
-                        "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "角色不存在",
-                        "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "服务器内部错误",
-                        "schema": {
-                            "$ref": "#/definitions/novel.ErrorResponse"
+                            "$ref": "#/definitions/http.ErrorResponse"
                         }
                     }
                 }
@@ -1771,6 +1435,247 @@
                 }
             }
         },
+        "/api/v1/scenes": {
+            "get": {
+                "description": "根据章节ID和版本号获取场景列表（按 sequence 排序）。如果不传版本号，则获取最新版本。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "内容管理"
+                ],
+                "summary": "获取场景列表",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "章节ID",
+                        "name": "chapter_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "版本号（可选，不传则获取最新版本）",
+                        "name": "version",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功响应",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器内部错误",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/scenes/images": {
+            "post": {
+                "description": "为章节的所有场景生成图片（抽卡）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "内容管理"
+                ],
+                "summary": "生成场景图片",
+                "parameters": [
+                    {
+                        "description": "生成场景图片请求",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/content.GenerateSceneImagesRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功响应",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器内部错误",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/shots": {
+            "get": {
+                "description": "根据章节ID和版本号获取镜头列表（按 index 排序）。镜头中包含解说内容。如果不传版本号，则获取最新版本。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "内容管理"
+                ],
+                "summary": "获取镜头列表",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "章节ID",
+                        "name": "chapter_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "版本号（可选，不传则获取最新版本）",
+                        "name": "version",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功响应",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器内部错误",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "更新分镜头的脚本信息（解说、图片提示词、视频提示词、运镜方式、时长等）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "内容管理"
+                ],
+                "summary": "更新分镜头信息",
+                "parameters": [
+                    {
+                        "description": "请求体",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/content.UpdateShotRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功响应",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器内部错误",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/shots/regenerate": {
+            "post": {
+                "description": "调用 LLM 重新生成分镜头的脚本信息（解说、图片提示词、视频提示词、运镜方式、时长等）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "内容管理"
+                ],
+                "summary": "重新生成分镜头脚本",
+                "parameters": [
+                    {
+                        "description": "请求体",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/content.RegenerateShotScriptRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功响应",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器内部错误",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/videos": {
             "get": {
                 "description": "根据状态查询视频列表，用于轮询视频生成进度。支持的状态：pending（待处理）、processing（处理中）、completed（已完成）、failed（失败）",
@@ -1811,98 +1716,6 @@
                         "description": "服务器内部错误",
                         "schema": {
                             "$ref": "#/definitions/novel.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/workflow": {
-            "post": {
-                "description": "创建新的工作流实例",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "工作流"
-                ],
-                "summary": "创建工作流",
-                "parameters": [
-                    {
-                        "description": "创建工作流请求",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/workflow.CreateWorkflowRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "成功响应",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "请求参数错误",
-                        "schema": {
-                            "$ref": "#/definitions/workflow.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "服务器内部错误",
-                        "schema": {
-                            "$ref": "#/definitions/workflow.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/workflow/{id}/start": {
-            "post": {
-                "description": "启动待处理的工作流，开始执行剧本生成流程",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "工作流"
-                ],
-                "summary": "启动工作流",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "工作流ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "成功响应",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "请求参数错误",
-                        "schema": {
-                            "$ref": "#/definitions/workflow.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "服务器内部错误",
-                        "schema": {
-                            "$ref": "#/definitions/workflow.ErrorResponse"
                         }
                     }
                 }
@@ -2037,24 +1850,169 @@
                 }
             }
         },
-        "novel.CreateNovelRequest": {
+        "content.CreateNovelRequest": {
             "type": "object",
             "required": [
+                "narration_type",
                 "resource_id",
-                "user_id",
-                "workflow_id"
+                "style",
+                "user_id"
             ],
             "properties": {
+                "narration_type": {
+                    "description": "旁白类型：narration（旁白/解说）或 dialogue（真人对话）",
+                    "type": "string"
+                },
                 "resource_id": {
                     "description": "资源ID（必填）",
+                    "type": "string"
+                },
+                "style": {
+                    "description": "风格：anime（漫剧）、live（真人剧）、mixed（混合）",
                     "type": "string"
                 },
                 "user_id": {
                     "description": "用户ID（必填）",
                     "type": "string"
+                }
+            }
+        },
+        "content.GenerateCharacterImagesRequest": {
+            "type": "object",
+            "required": [
+                "novel_id"
+            ],
+            "properties": {
+                "novel_id": {
+                    "description": "小说ID（必填）",
+                    "type": "string"
+                }
+            }
+        },
+        "content.GeneratePropImagesRequest": {
+            "type": "object",
+            "required": [
+                "novel_id"
+            ],
+            "properties": {
+                "novel_id": {
+                    "description": "小说ID（必填）",
+                    "type": "string"
+                }
+            }
+        },
+        "content.GenerateSceneImagesRequest": {
+            "type": "object",
+            "required": [
+                "chapter_id"
+            ],
+            "properties": {
+                "chapter_id": {
+                    "description": "章节ID（必填）",
+                    "type": "string"
                 },
-                "workflow_id": {
-                    "description": "工作流ID（必填）",
+                "version": {
+                    "description": "版本号（可选，不传则使用最新版本）",
+                    "type": "integer"
+                }
+            }
+        },
+        "content.RegenerateShotScriptRequest": {
+            "type": "object",
+            "required": [
+                "shot_id"
+            ],
+            "properties": {
+                "shot_id": {
+                    "description": "分镜头ID（必填）",
+                    "type": "string"
+                }
+            }
+        },
+        "content.SplitChaptersRequest": {
+            "type": "object",
+            "required": [
+                "novel_id",
+                "target_chapters"
+            ],
+            "properties": {
+                "novel_id": {
+                    "description": "小说ID（必填）",
+                    "type": "string"
+                },
+                "target_chapters": {
+                    "description": "目标章节数（必填，至少1章）",
+                    "type": "integer",
+                    "minimum": 1
+                }
+            }
+        },
+        "content.SyncCharactersRequest": {
+            "type": "object",
+            "required": [
+                "chapter_id",
+                "novel_id"
+            ],
+            "properties": {
+                "chapter_id": {
+                    "description": "章节ID（必填）",
+                    "type": "string"
+                },
+                "novel_id": {
+                    "description": "小说ID（必填）",
+                    "type": "string"
+                },
+                "version": {
+                    "description": "版本号（可选，不传则使用最新版本）",
+                    "type": "integer"
+                }
+            }
+        },
+        "content.UpdateShotRequest": {
+            "type": "object",
+            "required": [
+                "shot_id"
+            ],
+            "properties": {
+                "camera_movement": {
+                    "description": "运镜方式",
+                    "type": "string"
+                },
+                "duration": {
+                    "description": "时长（秒）",
+                    "type": "number"
+                },
+                "image_prompt": {
+                    "description": "图片提示词",
+                    "type": "string"
+                },
+                "narration": {
+                    "description": "解说内容",
+                    "type": "string"
+                },
+                "shot_id": {
+                    "description": "分镜头ID（必填）",
+                    "type": "string"
+                },
+                "video_prompt": {
+                    "description": "视频提示词",
+                    "type": "string"
+                }
+            }
+        },
+        "http.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "description": "错误码（非0表示错误）",
+                    "type": "integer"
+                },
+                "detail": {
+                    "description": "错误详情（可选）",
+                    "type": "string"
+                },
+                "message": {
+                    "description": "错误消息",
                     "type": "string"
                 }
             }
@@ -2076,131 +2034,7 @@
                 }
             }
         },
-        "novel.ManualNarrationRequest": {
-            "type": "object",
-            "required": [
-                "narration_text",
-                "user_id"
-            ],
-            "properties": {
-                "narration_text": {
-                    "description": "解说 JSON 文本（必填）",
-                    "type": "string"
-                },
-                "prompt": {
-                    "description": "生成提示词（可选，便于记录）",
-                    "type": "string"
-                },
-                "user_id": {
-                    "description": "用户ID（必填）",
-                    "type": "string"
-                }
-            }
-        },
-        "novel.SetNarrationVersionRequest": {
-            "type": "object",
-            "required": [
-                "narration_id",
-                "version"
-            ],
-            "properties": {
-                "narration_id": {
-                    "description": "解说ID（必填）",
-                    "type": "string"
-                },
-                "version": {
-                    "description": "版本号（必填）",
-                    "type": "integer"
-                }
-            }
-        },
-        "novel.SplitChaptersRequest": {
-            "type": "object",
-            "required": [
-                "novel_id",
-                "target_chapters"
-            ],
-            "properties": {
-                "novel_id": {
-                    "description": "小说ID（必填）",
-                    "type": "string"
-                },
-                "target_chapters": {
-                    "description": "目标章节数（必填，至少1章）",
-                    "type": "integer",
-                    "minimum": 1
-                }
-            }
-        },
-        "novel.SyncCharactersRequest": {
-            "type": "object",
-            "required": [
-                "narration_id",
-                "novel_id"
-            ],
-            "properties": {
-                "narration_id": {
-                    "description": "解说ID（必填）",
-                    "type": "string"
-                },
-                "novel_id": {
-                    "description": "小说ID（必填）",
-                    "type": "string"
-                }
-            }
-        },
         "resource.ErrorResponse": {
-            "type": "object",
-            "properties": {
-                "code": {
-                    "description": "错误码（非0表示错误）",
-                    "type": "integer"
-                },
-                "detail": {
-                    "description": "错误详情（可选）",
-                    "type": "string"
-                },
-                "message": {
-                    "description": "错误消息",
-                    "type": "string"
-                }
-            }
-        },
-        "workflow.CreateWorkflowRequest": {
-            "type": "object",
-            "required": [
-                "input_type",
-                "name",
-                "narration_type"
-            ],
-            "properties": {
-                "input_type": {
-                    "description": "text 或 file",
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "narration_type": {
-                    "description": "旁白类型：narration（旁白/解说）或 dialogue（真人对话）",
-                    "type": "string"
-                },
-                "resource_id": {
-                    "type": "string"
-                },
-                "resource_source": {
-                    "type": "string"
-                },
-                "text_content": {
-                    "type": "string"
-                },
-                "user_id": {
-                    "description": "UserID 保留给兼容用途，正常情况下应从认证中间件注入的 context 中获取",
-                    "type": "string"
-                }
-            }
-        },
-        "workflow.ErrorResponse": {
             "type": "object",
             "properties": {
                 "code": {

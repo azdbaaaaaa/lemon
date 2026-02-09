@@ -70,6 +70,7 @@ type ResourceService interface {
 type resourceService struct {
 	resourceRepo *resourceRepo.ResourceRepo
 	storage      storage.Storage
+	baseURL      string // API基础URL，用于生成资源访问URL
 }
 
 // NewResourceService 创建资源服务
@@ -77,6 +78,7 @@ type resourceService struct {
 func NewResourceService(
 	db *mongo.Database,
 	storage storage.Storage,
+	baseURL string, // API基础URL，如 "http://localhost:7080"
 ) ResourceService {
 	// 初始化 repository
 	resourceRepo := resourceRepo.NewResourceRepo(db)
@@ -84,6 +86,7 @@ func NewResourceService(
 	return &resourceService{
 		resourceRepo: resourceRepo,
 		storage:      storage,
+		baseURL:      baseURL,
 	}
 }
 
@@ -342,11 +345,24 @@ func (s *resourceService) GetDownloadURL(ctx context.Context, req *GetDownloadUR
 		expiresIn = time.Hour
 	}
 
-	// 生成预签名下载URL
-	downloadURL, err := s.storage.GetPresignedDownloadURL(ctx, res.StorageKey, expiresIn)
-	if err != nil {
-		log.Error().Err(err).Str("key", res.StorageKey).Msg("failed to generate download URL")
-		return nil, errors.New("生成下载URL失败")
+	// 对于本地存储，返回通过资源ID访问的API URL
+	// 对于云存储（OSS/S3等），使用预签名URL
+	var downloadURL string
+	if s.baseURL != "" {
+		// 使用API URL，统一通过资源模块管理
+		// 如果有扩展名，在URL后面拼接扩展名，方便前端处理
+		downloadURL = s.baseURL + "/api/v1/resources/" + res.ID + "/download"
+		if res.Ext != "" {
+			downloadURL += "." + res.Ext
+		}
+	} else {
+		// 如果没有配置baseURL，回退到存储的预签名URL
+		presignedURL, err := s.storage.GetPresignedDownloadURL(ctx, res.StorageKey, expiresIn)
+		if err != nil {
+			log.Error().Err(err).Str("key", res.StorageKey).Msg("failed to generate download URL")
+			return nil, errors.New("生成下载URL失败")
+		}
+		downloadURL = presignedURL
 	}
 
 	return &GetDownloadURLResult{

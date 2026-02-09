@@ -8,38 +8,45 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"lemon/internal/model/novel"
+	"lemon/internal/service"
 )
 
 // AudioInfo 音频信息 DTO
 type AudioInfo struct {
 	ID              string  `json:"id"`
-	NarrationID     string  `json:"narration_id"`
+	NarrationID     string  `json:"narration_id,omitempty"`
+	ShotID          string  `json:"shot_id,omitempty"`
 	ChapterID       string  `json:"chapter_id"`
 	UserID          string  `json:"user_id"`
-	Sequence        int     `json:"sequence"`
+	Sequence        int     `json:"sequence,omitempty"`
 	AudioResourceID string  `json:"audio_resource_id"`
+	AudioURL        string  `json:"audio_url,omitempty"` // 音频直接访问URL
 	Duration        float64 `json:"duration"`
 	Text            string  `json:"text"`
 	Prompt          string  `json:"prompt,omitempty"`
 	Version         int     `json:"version"`
 	Status          string  `json:"status"`
+	ErrorMessage    string  `json:"error_message,omitempty"`
 	CreatedAt       string  `json:"created_at"`
 	UpdatedAt       string  `json:"updated_at"`
 }
 
-func toAudioInfo(a *novel.Audio) AudioInfo {
+func toAudioInfo(a *novel.Audio, audioURL string) AudioInfo {
 	return AudioInfo{
 		ID:              a.ID,
-		NarrationID:     a.NarrationID,
+		NarrationID:     "", // 已删除，保留字段以兼容旧API
+		ShotID:          a.ShotID,
 		ChapterID:       a.ChapterID,
 		UserID:          a.UserID,
-		Sequence:        a.Sequence,
+		Sequence:        0, // 已删除，保留字段以兼容旧API
 		AudioResourceID: a.AudioResourceID,
+		AudioURL:        audioURL,
 		Duration:        a.Duration,
 		Text:            a.Text,
 		Prompt:          a.Prompt,
 		Version:         a.Version,
 		Status:          string(a.Status),
+		ErrorMessage:    a.ErrorMessage,
 		CreatedAt:       a.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:       a.UpdatedAt.Format(time.RFC3339),
 	}
@@ -65,9 +72,9 @@ func toSubtitleInfo(s *novel.Subtitle) SubtitleInfo {
 	return SubtitleInfo{
 		ID:                 s.ID,
 		ChapterID:          s.ChapterID,
-		NarrationID:        s.NarrationID,
+		NarrationID:        "", // 已删除，保留字段以兼容旧API
 		UserID:             s.UserID,
-		Sequence:           s.Sequence,
+		Sequence:           0, // 已删除，保留字段以兼容旧API
 		SubtitleResourceID: s.SubtitleResourceID,
 		Format:             string(s.Format),
 		Prompt:             s.Prompt,
@@ -98,16 +105,16 @@ type ImageInfo struct {
 func toImageInfo(i *novel.Image) ImageInfo {
 	return ImageInfo{
 		ID:             i.ID,
-		ChapterID:       i.ChapterID,
-		NarrationID:     i.NarrationID,
-		SceneNumber:     i.SceneNumber,
-		ShotNumber:      i.ShotNumber,
+		ChapterID:       "", // 已删除，保留字段以兼容旧API
+		NarrationID:     "", // 已删除，保留字段以兼容旧API
+		SceneNumber:     "", // 已删除，保留字段以兼容旧API
+		ShotNumber:      "", // 已删除，保留字段以兼容旧API
 		ImageResourceID: i.ImageResourceID,
-		CharacterName:   i.CharacterName,
+		CharacterName:   "", // 已删除，保留字段以兼容旧API
 		Prompt:          i.Prompt,
 		Version:         i.Version,
 		Status:          string(i.Status),
-		Sequence:        i.Sequence,
+		Sequence:        0, // 已删除，保留字段以兼容旧API
 		CreatedAt:       i.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:       i.UpdatedAt.Format(time.RFC3339),
 	}
@@ -131,7 +138,15 @@ func (h *Handler) ListAudiosByNarration(c *gin.Context) {
 	}
 	out := make([]AudioInfo, 0, len(audios))
 	for _, a := range audios {
-		out = append(out, toAudioInfo(a))
+		// 获取音频URL
+		audioURL, _ := h.resourceService.GetDownloadURL(ctx, &service.GetDownloadURLRequest{
+			ResourceID: a.AudioResourceID,
+		})
+		url := ""
+		if audioURL != nil {
+			url = audioURL.DownloadURL
+		}
+		out = append(out, toAudioInfo(a, url))
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"code":    0,
@@ -231,8 +246,48 @@ func (h *Handler) ListVideosByChapter(c *gin.Context) {
 		"data": gin.H{
 			"chapter_id": chapterID,
 			"version":    resolved,
-			"videos":     toVideoInfoList(videos),
+			"videos":     toVideoInfoList(ctx, videos, h.resourceService),
 			"count":      len(videos),
+		},
+	})
+}
+
+// ListAudiosByChapter 列出章节音频列表（可选 version）
+// @Router /api/v1/chapters/{chapter_id}/audios [get]
+func (h *Handler) ListAudiosByChapter(c *gin.Context) {
+	chapterID := c.Param("chapter_id")
+	if chapterID == "" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Code: 40001, Message: "chapter_id is required"})
+		return
+	}
+	version := parseOptionalIntQuery(c, "version")
+
+	ctx := c.Request.Context()
+	audios, resolved, err := h.novelService.ListAudiosByChapter(ctx, chapterID, version)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Code: 50001, Message: err.Error()})
+		return
+	}
+	out := make([]AudioInfo, 0, len(audios))
+	for _, a := range audios {
+		// 获取音频URL
+		audioURL, _ := h.resourceService.GetDownloadURL(ctx, &service.GetDownloadURLRequest{
+			ResourceID: a.AudioResourceID,
+		})
+		url := ""
+		if audioURL != nil {
+			url = audioURL.DownloadURL
+		}
+		out = append(out, toAudioInfo(a, url))
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "success",
+		"data": gin.H{
+			"chapter_id": chapterID,
+			"version":    resolved,
+			"audios":     out,
+			"count":      len(out),
 		},
 	})
 }

@@ -16,6 +16,8 @@ type ChapterRepository interface {
 	Create(ctx context.Context, ch *novel.Chapter) error
 	FindByID(ctx context.Context, id string) (*novel.Chapter, error)
 	FindByNovelID(ctx context.Context, novelID string) ([]*novel.Chapter, error)
+	Update(ctx context.Context, id string, updates map[string]interface{}) error
+	DeleteByNovelID(ctx context.Context, novelID string) error
 }
 
 // ChapterRepo 章节仓库
@@ -62,6 +64,30 @@ func (r *ChapterRepo) FindByNovelID(ctx context.Context, novelID string) ([]*nov
 		return nil, err
 	}
 	return chapters, nil
+}
+
+// Update 更新章节
+func (r *ChapterRepo) Update(ctx context.Context, id string, updates map[string]interface{}) error {
+	updates["updated_at"] = time.Now()
+	_, err := r.coll.UpdateOne(
+		ctx,
+		bson.M{"id": id},
+		bson.M{"$set": updates},
+	)
+	return err
+}
+
+// DeleteByNovelID 根据小说ID删除所有章节（软删除）
+func (r *ChapterRepo) DeleteByNovelID(ctx context.Context, novelID string) error {
+	_, err := r.coll.UpdateMany(
+		ctx,
+		bson.M{"novel_id": novelID, "deleted_at": nil},
+		bson.M{"$set": bson.M{
+			"deleted_at": time.Now(),
+			"updated_at": time.Now(),
+		}},
+	)
+	return err
 }
 
 // 章节的解说内容由 Narration/Scene/Shot 等表单独管理，这里不再维护 narration_text 字段。

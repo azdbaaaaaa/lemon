@@ -30,6 +30,9 @@ func (h *Handler) DownloadFile(c *gin.Context) {
 		})
 		return
 	}
+	
+	// 如果URL中包含扩展名参数，忽略它（扩展名仅用于URL美观，实际通过resource_id查询）
+	_ = c.Param("ext")
 
 	ctx := c.Request.Context()
 

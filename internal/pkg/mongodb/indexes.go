@@ -24,7 +24,6 @@ func EnsureIndexes(db *mongo.Database) error {
 		&resource.UploadSession{},
 		&novel.Novel{},
 		&novel.Chapter{},
-		&novel.Narration{},
 		&novel.Scene{},
 		&novel.Shot{},
 		&novel.Audio{},
