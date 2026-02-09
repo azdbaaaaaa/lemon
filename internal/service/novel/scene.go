@@ -29,6 +29,9 @@ type SceneService interface {
 
 	// SetActiveSceneVersion 设置章节的生效场景版本号
 	SetActiveSceneVersion(ctx context.Context, chapterID string, version int) error
+
+	// GetShotByID 根据镜头ID获取镜头详情
+	GetShotByID(ctx context.Context, shotID string) (*novel.Shot, error)
 }
 
 // GetScenesByChapterID 根据章节ID获取场景列表（默认返回当前生效版本）
@@ -63,7 +66,28 @@ func (s *novelService) GetShotsByChapterID(ctx context.Context, chapterID string
 
 // UpdateShot 更新分镜头信息
 func (s *novelService) UpdateShot(ctx context.Context, shotID string, updates map[string]interface{}) error {
-	return s.shotRepo.Update(ctx, shotID, updates)
+	// 验证镜头是否存在
+	shot, err := s.shotRepo.FindByID(ctx, shotID)
+	if err != nil {
+		return fmt.Errorf("find shot: %w", err)
+	}
+	if shot == nil {
+		return fmt.Errorf("shot not found: %s", shotID)
+	}
+
+	// 添加更新时间
+	updates["updated_at"] = time.Now()
+
+	// 调用 repository 更新
+	if err := s.shotRepo.Update(ctx, shotID, updates); err != nil {
+		return fmt.Errorf("update shot: %w", err)
+	}
+
+	log.Info().
+		Str("shot_id", shotID).
+		Msg("镜头信息已更新")
+
+	return nil
 }
 
 // CreateDefaultScenesAndShots 创建默认的场景和镜头（根据章节内容生成10个场景，每个场景1-4个镜头）
@@ -219,13 +243,17 @@ func (s *novelService) CreateDefaultScenesAndShots(ctx context.Context, novelID,
 	}
 
 	// 更新镜头的 SceneID、生成新的 ID 并设置版本号
+	// 注意：sequence 需要全局唯一（跨场景），不能只是场景内的顺序
+	globalSequence := 1
 	for _, shot := range shots {
 		// 更新 SceneID 为新的场景ID
 		if newSceneID, ok := sceneIDMap[shot.SceneID]; ok {
 			shot.SceneID = newSceneID
 		}
 		shot.ID = id.New()
-		shot.Version = newVersion // 设置版本号（与场景版本号一致）
+		shot.Version = newVersion      // 设置版本号（与场景版本号一致）
+		shot.Sequence = globalSequence // 全局序号，确保跨场景唯一
+		globalSequence++
 		shot.CreatedAt = now
 		shot.UpdatedAt = now
 		if shot.Status == "" {
@@ -297,4 +325,9 @@ func (s *novelService) SetActiveSceneVersion(ctx context.Context, chapterID stri
 		Msg("章节生效场景版本号已更新")
 
 	return nil
+}
+
+// GetShotByID 根据镜头ID获取镜头详情
+func (s *novelService) GetShotByID(ctx context.Context, shotID string) (*novel.Shot, error) {
+	return s.shotRepo.FindByID(ctx, shotID)
 }

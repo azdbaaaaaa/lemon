@@ -276,19 +276,28 @@ func (s *Server) setupRoutes() {
 						contentGroup.PUT("/scenes/version", contentHdl.SetActiveSceneVersion)
 
 						// 镜头管理接口
-						contentGroup.GET("/shots", contentHdl.GetShots)
+						contentGroup.GET("/shots", contentHdl.GetShots) // 支持 chapter_id（列表）或 shot_id（详情）
 						contentGroup.PUT("/shots", contentHdl.UpdateShot)
+						contentGroup.POST("/shots/images", contentHdl.GenerateShotImages)
+						contentGroup.GET("/shots/images", contentHdl.GetShotImages)
+						contentGroup.POST("/shots/audio", contentHdl.GenerateShotAudio)
+						contentGroup.GET("/shots/audios", contentHdl.GetShotAudios)
+						contentGroup.POST("/shots/video", contentHdl.GenerateShotVideo)
+						contentGroup.GET("/shots/videos", contentHdl.GetShotVideos)
 
 						// 角色管理接口
 						contentGroup.GET("/characters", contentHdl.GetCharactersByNovelID)
 						contentGroup.GET("/characters/detail", contentHdl.GetCharacterByName)
 						contentGroup.POST("/characters/sync", contentHdl.SyncCharacters)
+						contentGroup.POST("/characters/generate-from-novel", contentHdl.GenerateCharactersFromNovel)
 						contentGroup.POST("/characters/images", contentHdl.GenerateCharacterImages)
+						contentGroup.GET("/characters/images", contentHdl.GetCharacterImages)
 						contentGroup.GET("/characters/images/status", contentHdl.GetCharacterImageGenerationStatus)
 
 						// 道具管理接口
 						contentGroup.GET("/props", contentHdl.GetPropsByNovelID)
 						contentGroup.POST("/props/images", contentHdl.GeneratePropImages)
+						contentGroup.GET("/props/images", contentHdl.GetPropImages)
 						contentGroup.GET("/props/images/status", contentHdl.GetPropImageGenerationStatus)
 					}
 
@@ -298,36 +307,35 @@ func (s *Server) setupRoutes() {
 					novelGroup.Use(middleware.Auth(jwtUtil))
 					{
 						// 音频生成接口
-						novelGroup.POST("/narrations/:narration_id/audios", contentHdl.GenerateAudios)
-						novelGroup.GET("/narrations/:narration_id/audios", contentHdl.ListAudiosByNarration)
-						novelGroup.GET("/narrations/:narration_id/audios/versions", contentHdl.GetAudioVersions)
+						novelGroup.POST("/narrations/audios", contentHdl.GenerateAudios)
+						novelGroup.GET("/narrations/audios", contentHdl.ListAudiosByNarration)
+						novelGroup.GET("/narrations/audios/versions", contentHdl.GetAudioVersions)
 						// 基于章节的音频生成接口（新接口）
-						novelGroup.POST("/chapters/:chapter_id/audios", contentHdl.GenerateAudiosForChapter)
+						novelGroup.POST("/chapters/audios", contentHdl.GenerateAudiosForChapter)
 
 						// 字幕生成接口
-						novelGroup.POST("/narrations/:narration_id/subtitles", contentHdl.GenerateSubtitles)
-						novelGroup.GET("/narrations/:narration_id/subtitles", contentHdl.ListSubtitlesByNarration)
-						novelGroup.GET("/novels/chapters/:chapter_id/subtitles/versions", contentHdl.GetSubtitleVersions)
+						novelGroup.POST("/narrations/subtitles", contentHdl.GenerateSubtitles)
+						novelGroup.GET("/narrations/subtitles", contentHdl.ListSubtitlesByNarration)
+						novelGroup.GET("/novels/chapters/subtitles/versions", contentHdl.GetSubtitleVersions)
 
 						// 图片生成接口
-						novelGroup.POST("/narrations/:narration_id/images", contentHdl.GenerateImages)
-						novelGroup.GET("/narrations/:narration_id/images", contentHdl.ListImagesByNarration)
-						novelGroup.GET("/novels/chapters/:chapter_id/images/versions", contentHdl.GetImageVersions)
+						novelGroup.POST("/narrations/images", contentHdl.GenerateImages)
+						novelGroup.GET("/narrations/images", contentHdl.ListImagesByNarration)
+						novelGroup.GET("/novels/chapters/images/versions", contentHdl.GetImageVersions)
 
 						// 视频生成接口
-						novelGroup.POST("/novels/chapters/:chapter_id/videos/narration", contentHdl.GenerateNarrationVideos)
-						novelGroup.POST("/novels/chapters/:chapter_id/videos/final", contentHdl.GenerateFinalVideo)
-						// 基于章节的视频生成接口（新接口）
-						novelGroup.POST("/chapters/:chapter_id/videos", contentHdl.GenerateVideosForChapter)
+						novelGroup.POST("/chapters/videos/shots", contentHdl.GenerateShotVideos)
+						novelGroup.POST("/chapters/videos", contentHdl.GenerateVideosForChapter)
+						novelGroup.POST("/chapters/videos/final", contentHdl.GenerateFinalVideo)
 
 						// 视频查询接口
-						novelGroup.GET("/novels/chapters/:chapter_id/videos", contentHdl.ListVideosByChapter)
-						novelGroup.GET("/novels/chapters/:chapter_id/videos/versions", contentHdl.GetVideoVersions)
+						novelGroup.GET("/novels/chapters/videos", contentHdl.ListVideosByChapter)
+						novelGroup.GET("/novels/chapters/videos/versions", contentHdl.GetVideoVersions)
 						novelGroup.GET("/videos", contentHdl.GetVideosByStatus)
 						// 基于章节的视频查询接口（新接口）
-						novelGroup.GET("/chapters/:chapter_id/videos", contentHdl.ListVideosByChapter)
+						novelGroup.GET("/chapters/videos", contentHdl.ListVideosByChapter)
 						// 基于章节的音频查询接口（新接口）
-						novelGroup.GET("/chapters/:chapter_id/audios", contentHdl.ListAudiosByChapter)
+						novelGroup.GET("/chapters/audios", contentHdl.ListAudiosByChapter)
 					}
 				}
 			}

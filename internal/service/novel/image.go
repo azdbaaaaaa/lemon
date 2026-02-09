@@ -41,6 +41,12 @@ type ImageService interface {
 
 	// GetPropImages 获取道具的所有图片
 	GetPropImages(ctx context.Context, propID string) ([]*novel.Image, error)
+
+	// GenerateShotImages 为单个镜头生成首图和尾图
+	GenerateShotImages(ctx context.Context, shotID string) ([]string, error)
+
+	// GetShotImages 获取镜头的所有图片（首图和尾图）
+	GetShotImages(ctx context.Context, shotID string) ([]*novel.Image, error)
 }
 
 // GenerateImagesForNarration 为章节解说生成所有章节图片
@@ -284,8 +290,8 @@ func (s *novelService) generatePropImagesAsync(ctx context.Context, novelEntity 
 			if err := s.propRepo.UpdateStatus(ctx, prop.ID, novel.TaskStatusFailed, "图片提示词为空"); err != nil {
 				log.Warn().Err(err).Str("prop_id", prop.ID).Msg("更新道具状态失败")
 			}
-			continue
-		}
+				continue
+			}
 
 		// 检查道具是否已有图片（通过查询 Image 表）
 		existingImages, err := s.imageRepo.FindByPropID(ctx, prop.ID)
@@ -371,4 +377,126 @@ func (s *novelService) GetCharacterImages(ctx context.Context, characterID strin
 // GetPropImages 获取道具的所有图片
 func (s *novelService) GetPropImages(ctx context.Context, propID string) ([]*novel.Image, error) {
 	return s.imageRepo.FindByPropID(ctx, propID)
+}
+
+// GenerateShotImages 为单个镜头生成首图和尾图
+func (s *novelService) GenerateShotImages(ctx context.Context, shotID string) ([]string, error) {
+	// 1. 获取镜头信息
+	shot, err := s.shotRepo.FindByID(ctx, shotID)
+	if err != nil {
+		return nil, fmt.Errorf("find shot: %w", err)
+	}
+
+	// 2. 检查提示词
+	if shot.FirstImagePrompt == "" && shot.LastImagePrompt == "" {
+		return nil, fmt.Errorf("shot has no image prompts")
+	}
+
+	// 3. 获取章节信息
+	chapter, err := s.chapterRepo.FindByID(ctx, shot.ChapterID)
+	if err != nil {
+		return nil, fmt.Errorf("find chapter: %w", err)
+	}
+
+	// 4. 获取下一个图片版本号
+	nextVersion, err := s.getNextImageVersion(ctx, shot.ChapterID, shot.Version)
+	if err != nil {
+		return nil, fmt.Errorf("get next image version: %w", err)
+	}
+
+	var imageIDs []string
+
+	// 5. 生成首图
+	if shot.FirstImagePrompt != "" {
+		imageID, err := s.generateShotImage(ctx, shot, chapter, novel.ImageTypeShotFirst, shot.FirstImagePrompt, nextVersion)
+		if err != nil {
+			log.Error().Err(err).Str("shot_id", shotID).Msg("生成首图失败")
+		} else {
+			imageIDs = append(imageIDs, imageID)
+		}
+	}
+
+	// 6. 生成尾图
+	if shot.LastImagePrompt != "" {
+		imageID, err := s.generateShotImage(ctx, shot, chapter, novel.ImageTypeShotLast, shot.LastImagePrompt, nextVersion)
+		if err != nil {
+			log.Error().Err(err).Str("shot_id", shotID).Msg("生成尾图失败")
+		} else {
+			imageIDs = append(imageIDs, imageID)
+		}
+	}
+
+	return imageIDs, nil
+}
+
+// generateShotImage 生成单个镜头图片（首图或尾图）
+func (s *novelService) generateShotImage(ctx context.Context, shot *novel.Shot, chapter *novel.Chapter, imageType novel.ImageType, prompt string, version int) (string, error) {
+	// 1. 生成图片
+	outputFilename := fmt.Sprintf("shot_%s_%s_%s.jpeg", shot.ID, imageType, id.New())
+	imageData, err := s.imageProvider.GenerateImage(ctx, prompt, outputFilename)
+	if err != nil {
+		return "", fmt.Errorf("generate image: %w", err)
+	}
+
+	// 2. 上传图片
+	uploadReq := &service.UploadFileRequest{
+		UserID:      chapter.UserID,
+		FileName:    outputFilename,
+		ContentType: "image/jpeg",
+		Ext:         "jpeg",
+		Data:        bytes.NewReader(imageData),
+	}
+
+	uploadResult, err := s.resourceService.UploadFile(ctx, uploadReq)
+	if err != nil {
+		return "", fmt.Errorf("upload image: %w", err)
+	}
+
+	// 3. 保存图片记录
+	imageID := id.New()
+	shotImage := &novel.Image{
+		ID:              imageID,
+		NovelID:         chapter.NovelID,
+		ImageType:       imageType,
+		ShotID:          shot.ID,
+		ImageResourceID: uploadResult.ResourceID,
+		Prompt:          prompt,
+		Version:         version,
+		Status:          novel.TaskStatusCompleted,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+	}
+
+	if err := s.imageRepo.Create(ctx, shotImage); err != nil {
+		return "", fmt.Errorf("create shot image record: %w", err)
+	}
+
+	log.Info().
+		Str("shot_id", shot.ID).
+		Str("image_type", string(imageType)).
+		Str("image_id", imageID).
+		Msg("镜头图片生成成功")
+
+	return imageID, nil
+}
+
+// GetShotImages 获取镜头的所有图片（首图和尾图）
+func (s *novelService) GetShotImages(ctx context.Context, shotID string) ([]*novel.Image, error) {
+	// 查询首图和尾图（version=0 表示查询所有版本）
+	firstImages, err := s.imageRepo.FindByShotIDAndTypeAndVersion(ctx, shotID, novel.ImageTypeShotFirst, 0)
+	if err != nil {
+		return nil, fmt.Errorf("find first images: %w", err)
+	}
+
+	lastImages, err := s.imageRepo.FindByShotIDAndTypeAndVersion(ctx, shotID, novel.ImageTypeShotLast, 0)
+	if err != nil {
+		return nil, fmt.Errorf("find last images: %w", err)
+	}
+
+	// 合并结果
+	var allImages []*novel.Image
+	allImages = append(allImages, firstImages...)
+	allImages = append(allImages, lastImages...)
+
+	return allImages, nil
 }

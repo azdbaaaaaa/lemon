@@ -145,8 +145,8 @@ func buildScenesAndShotsPrompt(chapterContent string, chapterNum, totalChapters 
 	b.WriteString("1. 必须生成10个场景（scene），每个场景包含1-4个镜头（shot）\n")
 	b.WriteString("2. 每个镜头必须包含：解说内容（narration）、首图提示词（first_image_prompt）、末图提示词（last_image_prompt）、视频提示词（video_prompt）、时长（duration）\n")
 	b.WriteString("3. 每个场景必须包含：场景描述（description）、场景序号（sequence）\n")
-	b.WriteString("4. 必须提取并列出本章节中出现的所有角色（characters），包括角色的基本信息（姓名、性别、年龄段、角色编号）和详细描述（外貌、性格、背景等），以及角色图片提示词\n")
-	b.WriteString("5. 必须提取并列出本章节中出现的所有重要道具（props），包括道具的名称、描述、类别（如：武器、法器、丹药、服饰等）和图片提示词\n")
+	b.WriteString("4. 必须提取并列出本章节中出现的所有角色（characters），包括角色的基本信息（姓名、性别、年龄段、角色编号）和详细描述（外貌、性格、背景等），以及角色图片提示词（image_prompt，字数要求：不少于 100 字）\n")
+	b.WriteString("5. 必须提取并列出本章节中出现的所有重要道具（props），包括道具的名称、描述、类别（如：武器、法器、丹药、服饰等）和图片提示词（image_prompt，字数要求：不少于 100 字）\n")
 
 	// 根据章节长度调整字数要求
 	var minNarrationWords, maxNarrationWords int
@@ -234,7 +234,7 @@ func buildScenesAndShotsPrompt(chapterContent string, chapterNum, totalChapters 
 		b.WriteString("3. 风格要求：电影级封面风格\n")
 	}
 
-	b.WriteString("4. 字数要求：不少于 120 字（中文字符）\n")
+	b.WriteString("4. 字数要求：不少于 100 字（中文字符）\n")
 	b.WriteString("5. 描述要求：使用中文完整描述，不要简化成短句，要详细具体\n")
 	b.WriteString("6. 首图提示词应该由场景描述+角色描述+行为/事件+构图词组成\n")
 	b.WriteString("7. 首图提示词不能包含文字相关的描述\n")
@@ -268,7 +268,7 @@ func buildScenesAndShotsPrompt(chapterContent string, chapterNum, totalChapters 
 		b.WriteString("3. 风格要求：电影级封面风格\n")
 	}
 
-	b.WriteString("4. 字数要求：不少于 120 字（中文字符）\n")
+	b.WriteString("4. 字数要求：不少于 100 字（中文字符）\n")
 	b.WriteString("5. 描述要求：使用中文完整描述，不要简化成短句，要详细具体\n")
 	b.WriteString("6. 末图提示词描述镜头结束时的画面状态\n")
 	b.WriteString("7. 末图提示词应该与首图提示词在场景和角色上保持一致，但可以有不同的动作或表情\n")
@@ -278,7 +278,8 @@ func buildScenesAndShotsPrompt(chapterContent string, chapterNum, totalChapters 
 	b.WriteString("1. 每个分镜头必须包含一个 video_prompt 字段，用于 AI 生成视频或分镜\n")
 	b.WriteString("2. 描述要求：偏\"动态画面描述\"，具有影视感，适合 10~30 秒短剧\n")
 	b.WriteString("3. 描述要求：使用中文完整描述，不要简化成短句\n")
-	b.WriteString("4. video_prompt 必须包含以下信息：\n")
+	b.WriteString("4. 字数要求：不少于 100 字（中文字符）\n")
+	b.WriteString("5. video_prompt 必须包含以下信息：\n")
 	b.WriteString("   - 人物动作：详细描述人物的动作、姿态变化、动作幅度等\n")
 	b.WriteString("   - 镜头运动：推进/拉远/横移/跟随/固定等运动方式，以及运动速度和节奏\n")
 	b.WriteString("   - 情绪变化：人物情绪的变化过程、表情变化等\n")
@@ -295,12 +296,12 @@ func buildScenesAndShotsPrompt(chapterContent string, chapterNum, totalChapters 
 	case novel.NovelStyleMixed:
 		b.WriteString("   - 画面风格：可以结合动画风格和真人拍摄风格，具有独特的视觉表现力\n")
 	}
-	b.WriteString("5. video_prompt 格式示例：\n")
+	b.WriteString("6. video_prompt 格式示例：\n")
 	b.WriteString("   - \"特写镜头，缓慢推进，时长15秒，人物缓缓回头，眼神从疑惑转为坚定，面部表情自然变化，画面有明显的动态效果，具有强烈的影视感\"\n")
 	b.WriteString("   - \"中景镜头，横移跟随，时长20秒，人物在场景中移动，动作流畅自然，情绪从紧张逐渐放松，树叶随风飘动，光影斑驳变化，适合短剧节奏\"\n")
 	b.WriteString("   - \"远景镜头，缓慢拉远，时长25秒，人物在场景中完成动作，情绪有明显变化，背景有轻微的运动感，画面层次丰富，具有电影质感\"\n")
 	b.WriteString("   - \"特写镜头，固定机位，时长12秒，人物有自然的动作和表情变化，情绪从平静转为激动，画面有明显的动态效果，适合短剧表现\"\n")
-	b.WriteString("6. 如果没有明确的动态效果需求，可以使用默认描述：\"特写镜头，固定机位，时长15秒，人物有自然的动作和表情变化，情绪有细微变化，画面有明显的动态效果，具有影视感，适合短剧节奏\"\n\n")
+	b.WriteString("7. 如果没有明确的动态效果需求，可以使用默认描述：\"特写镜头，固定机位，时长15秒，人物有自然的动作和表情变化，情绪有细微变化，画面有明显的动态效果，具有影视感，适合短剧节奏\"\n\n")
 
 	fmt.Fprintf(&b, "当前进度：第 %d 章 / 共 %d 章。\n\n", chapterNum, totalChapters)
 	b.WriteString("下面是本章节的原始内容：\n")
@@ -318,14 +319,14 @@ func buildScenesAndShotsPrompt(chapterContent string, chapterNum, totalChapters 
       "age_group": "青年/中年/老年/青少年/儿童",
       "role_number": "角色编号",
       "description": "角色详细描述（外貌、性格、背景等）",
-      "image_prompt": "角色图片提示词（用于生成角色图片）"
+      "image_prompt": "角色图片提示词（用于生成角色图片，字数要求：不少于 100 字）"
     }
   ],
   "props": [
     {
       "name": "道具名称",
       "description": "道具详细描述",
-      "image_prompt": "道具图片提示词（用于生成道具图片）",
+      "image_prompt": "道具图片提示词（用于生成道具图片，字数要求：不少于 100 字）",
       "category": "道具类别（如：武器、法器、丹药、服饰等）"
     }
   ],
@@ -335,9 +336,9 @@ func buildScenesAndShotsPrompt(chapterContent string, chapterNum, totalChapters 
       "shots": [
         {
           "narration": "分镜头解说内容（只包含故事内容，如：他缓缓转过身，目光中带着一丝疑惑。不要包含技术性描述）",
-          "first_image_prompt": "首图提示词（场景描述+角色描述+行为/事件+构图词）",
-          "last_image_prompt": "末图提示词（镜头结束时的画面状态）",
-          "video_prompt": "特写镜头，缓慢推进，时长8秒，人物缓缓回头，画面有明显的动态效果",
+          "first_image_prompt": "首图提示词（场景描述+角色描述+行为/事件+构图词，字数要求：不少于 100 字）",
+          "last_image_prompt": "末图提示词（镜头结束时的画面状态，字数要求：不少于 100 字）",
+          "video_prompt": "特写镜头，缓慢推进，时长8秒，人物缓缓回头，画面有明显的动态效果（字数要求：不少于 100 字）",
           "duration": 8.0
         },
         {

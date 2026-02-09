@@ -6,10 +6,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// GetVideoVersionsRequest 获取视频版本请求
-type GetVideoVersionsRequest struct {
-	ChapterID string `json:"chapter_id" uri:"chapter_id" binding:"required"` // 章节ID（必填）
-}
 
 // GetVideoVersionsResponseData 获取视频版本响应数据
 type GetVideoVersionsResponseData struct {
@@ -28,14 +24,13 @@ type GetVideoVersionsResponseData struct {
 // @Success      200         {object}  map[string]interface{}  "成功响应"  "{\"code\": 0, \"message\": \"success\", \"data\": {\"versions\": [1, 2, 3], \"count\": 3, \"chapter_id\": \"...\"}}"
 // @Failure      400         {object}  ErrorResponse  "请求参数错误"
 // @Failure      500         {object}  ErrorResponse  "服务器内部错误"
-// @Router       /api/v1/novels/chapters/{chapter_id}/videos/versions [get]
+// @Router       /api/v1/novels/chapters/videos/versions [get]
 func (h *Handler) GetVideoVersions(c *gin.Context) {
-	var req GetVideoVersionsRequest
-	if err := c.ShouldBindUri(&req); err != nil {
+	chapterID := c.Query("chapter_id")
+	if chapterID == "" {
 		c.JSON(http.StatusBadRequest, ErrorResponse{
 			Code:    40001,
-			Message: "Invalid chapter_id",
-			Detail:  err.Error(),
+			Message: "chapter_id is required",
 		})
 		return
 	}
@@ -43,7 +38,7 @@ func (h *Handler) GetVideoVersions(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	// 调用Service层
-	versions, err := h.novelService.GetVideoVersions(ctx, req.ChapterID)
+	versions, err := h.novelService.GetVideoVersions(ctx, chapterID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Code:    50001,
@@ -58,7 +53,7 @@ func (h *Handler) GetVideoVersions(c *gin.Context) {
 		"data": GetVideoVersionsResponseData{
 			Versions:  versions,
 			Count:     len(versions),
-			ChapterID: req.ChapterID,
+			ChapterID: chapterID,
 		},
 	})
 }

@@ -250,3 +250,85 @@ func (h *Handler) GetPropImageGenerationStatus(c *gin.Context) {
 		},
 	})
 }
+
+// GetPropImagesRequest 获取道具图片请求
+type GetPropImagesRequest struct {
+	PropID string `form:"prop_id" binding:"required"` // 道具ID（必填）
+}
+
+// GetPropImages 获取道具的所有图片
+// @Summary      获取道具图片列表
+// @Description  获取指定道具的所有图片（包括各个版本的图片）
+// @Tags         内容管理
+// @Accept       json
+// @Produce      json
+// @Param        prop_id  query     string  true  "道具ID"
+// @Success      200      {object}  map[string]interface{}  "成功响应"
+// @Failure      400      {object}  httputil.ErrorResponse  "请求参数错误"
+// @Failure      500      {object}  httputil.ErrorResponse  "服务器内部错误"
+// @Router       /api/v1/props/images [get]
+func (h *Handler) GetPropImages(c *gin.Context) {
+	propID := c.Query("prop_id")
+	if propID == "" {
+		c.JSON(http.StatusBadRequest, httputil.ErrorResponse{
+			Code:    40001,
+			Message: "prop_id is required",
+		})
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	// 调用Service层
+	images, err := h.novelService.GetPropImages(ctx, propID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, httputil.ErrorResponse{
+			Code:    50001,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	// 转换为 DTO 并获取图片URL
+	imageInfos := make([]ImageInfo, 0, len(images))
+	for _, img := range images {
+		// 获取图片URL
+		var imageURL string
+		if img.ImageResourceID != "" {
+			result, err := h.resourceService.GetDownloadURL(ctx, &service.GetDownloadURLRequest{
+				UserID:     "",
+				ResourceID: img.ImageResourceID,
+				ExpiresIn:  24 * time.Hour,
+			})
+			if err == nil && result != nil {
+				imageURL = result.DownloadURL
+			}
+		}
+		imageInfos = append(imageInfos, ImageInfo{
+			ID:              img.ID,
+			ChapterID:       "",
+			NarrationID:     "",
+			SceneNumber:     "",
+			ShotNumber:      "",
+			ImageResourceID: img.ImageResourceID,
+			ImageURL:        imageURL,
+			CharacterName:   "",
+			Prompt:          img.Prompt,
+			Version:         img.Version,
+			Status:          string(img.Status),
+			Sequence:        0,
+			CreatedAt:       img.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:       img.UpdatedAt.Format(time.RFC3339),
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "获取成功",
+		"data": gin.H{
+			"prop_id": propID,
+			"images":  imageInfos,
+			"count":   len(imageInfos),
+		},
+	})
+}

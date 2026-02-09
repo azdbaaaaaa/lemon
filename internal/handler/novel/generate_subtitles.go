@@ -8,7 +8,7 @@ import (
 
 // GenerateSubtitlesRequest 生成字幕请求
 type GenerateSubtitlesRequest struct {
-	NarrationID string `json:"narration_id" uri:"narration_id" binding:"required"` // 解说ID（必填）
+	NarrationID string `json:"narration_id" binding:"required"` // 解说ID（必填）
 }
 
 // GenerateSubtitlesResponseData 生成字幕响应数据
@@ -28,10 +28,10 @@ type GenerateSubtitlesResponseData struct {
 // @Success      200           {object}  map[string]interface{}  "成功响应"  "{\"code\": 0, \"message\": \"字幕生成任务已提交\", \"data\": {\"subtitle_ids\": [\"...\"], \"count\": 1, \"narration_id\": \"...\"}}"
 // @Failure      400           {object}  ErrorResponse  "请求参数错误"
 // @Failure      500           {object}  ErrorResponse  "服务器内部错误"
-// @Router       /api/v1/narrations/{narration_id}/subtitles [post]
+// @Router       /api/v1/narrations/subtitles [post]
 func (h *Handler) GenerateSubtitles(c *gin.Context) {
 	var req GenerateSubtitlesRequest
-	if err := c.ShouldBindUri(&req); err != nil {
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{
 			Code:    40001,
 			Message: "Invalid narration_id",
@@ -95,9 +95,9 @@ type GetSubtitleVersionsResponseData struct {
 // @Success      200         {object}  map[string]interface{}  "成功响应"  "{\"code\": 0, \"message\": \"获取成功\", \"data\": {\"chapter_id\": \"...\", \"versions\": [1, 2, 3]}}"
 // @Failure      400         {object}  ErrorResponse  "请求参数错误"
 // @Failure      500         {object}  ErrorResponse  "服务器内部错误"
-// @Router       /api/v1/novels/chapters/{chapter_id}/subtitles/versions [get]
+// @Router       /api/v1/novels/chapters/subtitles/versions [get]
 func (h *Handler) GetSubtitleVersions(c *gin.Context) {
-	chapterID := c.Param("chapter_id")
+	chapterID := c.Query("chapter_id")
 	if chapterID == "" {
 		c.JSON(http.StatusBadRequest, ErrorResponse{
 			Code:    40001,

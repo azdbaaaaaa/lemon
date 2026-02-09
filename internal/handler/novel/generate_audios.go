@@ -8,7 +8,7 @@ import (
 
 // GenerateAudiosRequest 生成音频请求
 type GenerateAudiosRequest struct {
-	NarrationID string `json:"narration_id" uri:"narration_id" binding:"required"` // 解说ID（必填）
+	NarrationID string `json:"narration_id" binding:"required"` // 解说ID（必填）
 }
 
 // GenerateAudiosResponseData 生成音频响应数据
@@ -28,10 +28,10 @@ type GenerateAudiosResponseData struct {
 // @Success      200           {object}  map[string]interface{}  "成功响应"  "{\"code\": 0, \"message\": \"音频生成任务已提交\", \"data\": {\"audio_ids\": [\"...\"], \"count\": 1, \"narration_id\": \"...\"}}"
 // @Failure      400           {object}  ErrorResponse  "请求参数错误"
 // @Failure      500           {object}  ErrorResponse  "服务器内部错误"
-// @Router       /api/v1/narrations/{narration_id}/audios [post]
+// @Router       /api/v1/narrations/audios [post]
 func (h *Handler) GenerateAudios(c *gin.Context) {
 	var req GenerateAudiosRequest
-	if err := c.ShouldBindUri(&req); err != nil {
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{
 			Code:    40001,
 			Message: "Invalid narration_id",
@@ -92,9 +92,9 @@ type GetAudioVersionsResponseData struct {
 // @Success      200           {object}  map[string]interface{}  "成功响应"  "{\"code\": 0, \"message\": \"获取成功\", \"data\": {\"narration_id\": \"...\", \"versions\": [1, 2, 3]}}"
 // @Failure      400           {object}  ErrorResponse  "请求参数错误"
 // @Failure      500           {object}  ErrorResponse  "服务器内部错误"
-// @Router       /api/v1/narrations/{narration_id}/audios/versions [get]
+// @Router       /api/v1/narrations/audios/versions [get]
 func (h *Handler) GetAudioVersions(c *gin.Context) {
-	narrationID := c.Param("narration_id")
+	narrationID := c.Query("narration_id")
 	if narrationID == "" {
 		c.JSON(http.StatusBadRequest, ErrorResponse{
 			Code:    40001,
@@ -127,7 +127,7 @@ func (h *Handler) GetAudioVersions(c *gin.Context) {
 
 // GenerateAudiosForChapterRequest 为章节生成音频请求
 type GenerateAudiosForChapterRequest struct {
-	ChapterID string `json:"chapter_id" uri:"chapter_id" binding:"required"` // 章节ID（必填）
+	ChapterID string `json:"chapter_id" binding:"required"` // 章节ID（必填）
 }
 
 // GenerateAudiosForChapterResponseData 为章节生成音频响应数据
@@ -146,10 +146,10 @@ type GenerateAudiosForChapterResponseData struct {
 // @Success      200         {object}  map[string]interface{}  "成功响应"
 // @Failure      400         {object}  ErrorResponse  "请求参数错误"
 // @Failure      500         {object}  ErrorResponse  "服务器内部错误"
-// @Router       /api/v1/chapters/{chapter_id}/audios [post]
+// @Router       /api/v1/chapters/audios [post]
 func (h *Handler) GenerateAudiosForChapter(c *gin.Context) {
 	var req GenerateAudiosForChapterRequest
-	if err := c.ShouldBindUri(&req); err != nil {
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{
 			Code:    40001,
 			Message: "Invalid chapter_id",

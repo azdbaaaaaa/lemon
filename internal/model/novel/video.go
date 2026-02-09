@@ -90,7 +90,7 @@ func (v *Video) EnsureIndexes(ctx context.Context, db *mongo.Database) error {
 		{
 			// 分镜视频索引（支持多版本）
 			Keys:    bson.D{{Key: "shot_id", Value: 1}, {Key: "video_type", Value: 1}, {Key: "version", Value: 1}},
-			Options: options.Index().SetUnique(true).SetPartialFilterExpression(bson.M{"shot_id": bson.M{"$exists": true, "$ne": ""}, "video_type": VideoTypeShot}).SetName("idx_shot_type_version_unique"),
+			Options: options.Index().SetUnique(true).SetPartialFilterExpression(bson.M{"shot_id": bson.M{"$exists": true, "$type": "string"}, "video_type": VideoTypeShot}).SetName("idx_shot_type_version_unique"),
 		},
 		{
 			Keys:    bson.D{{Key: "shot_id", Value: 1}},

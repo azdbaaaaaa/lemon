@@ -52,6 +52,12 @@ type VideoService interface {
 	// ListVideosByChapter 获取章节视频列表（可指定版本；version<=0 则取最新版本）
 	// 注意：narration 模块已删除，此方法需要重构
 	ListVideosByChapter(ctx context.Context, chapterID string, version int) ([]*novel.Video, int, error)
+
+	// GenerateVideoForShot 为单个镜头生成视频
+	GenerateVideoForShot(ctx context.Context, shotID string) (string, error)
+
+	// GetVideosByShot 获取镜头的所有视频
+	GetVideosByShot(ctx context.Context, shotID string) ([]*novel.Video, error)
 }
 
 // GenerateFirstVideosForChapter 已废弃：现在所有视频都使用图生视频方式，不再需要 first_video
@@ -83,7 +89,7 @@ func (s *novelService) GenerateVideosForChapter(ctx context.Context, chapterID s
 
 	// 2. 获取该版本的所有 shot
 	shots, err := s.shotRepo.FindByChapterIDAndVersion(ctx, chapterID, chapter.ActiveSceneVersion)
-	if err != nil {
+		if err != nil {
 		return nil, fmt.Errorf("find shots: %w", err)
 	}
 
@@ -93,38 +99,84 @@ func (s *novelService) GenerateVideosForChapter(ctx context.Context, chapterID s
 
 	// 3. 获取下一个视频版本号
 	nextVersion, err := s.getNextVideoVersion(ctx, chapterID, chapter.ActiveSceneVersion)
-	if err != nil {
+		if err != nil {
 		return nil, fmt.Errorf("get next video version: %w", err)
+		}
+
+	// 4. 先为每个 shot 创建视频记录（状态为 pending），以便前端可以轮询
+	var videoIDs []string
+		for _, shot := range shots {
+		videoID := id.New()
+		video := &novel.Video{
+			ID:        videoID,
+			NovelID:   chapter.NovelID,
+			UserID:    chapter.UserID,
+			VideoType: novel.VideoTypeShot,
+			ShotID:    shot.ID,
+			ChapterID: chapter.ID,
+			Version:   nextVersion,
+			Status:    novel.VideoStatusPending,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
+
+		if err := s.videoRepo.Create(ctx, video); err != nil {
+			log.Error().
+				Err(err).
+				Str("shot_id", shot.ID).
+				Str("chapter_id", chapterID).
+				Msg("创建视频记录失败")
+			continue
+		}
+
+		videoIDs = append(videoIDs, videoID)
 	}
 
-	// 4. 异步生成视频（类似图片生成）
+	// 5. 异步生成视频
 	go func() {
 		ctx := context.Background()
-		for _, shot := range shots {
-			_, err := s.generateVideoForShot(ctx, shot, chapter, nextVersion)
-			if err != nil {
+		for idx, shot := range shots {
+			if idx >= len(videoIDs) {
+				continue
+			}
+			videoID := videoIDs[idx]
+			if err := s.generateVideoForShot(ctx, videoID, shot, chapter, nextVersion); err != nil {
 				log.Error().
 					Err(err).
 					Str("shot_id", shot.ID).
+					Str("video_id", videoID).
 					Str("chapter_id", chapterID).
 					Msg("生成视频失败")
+				// 更新状态为失败
+				if updateErr := s.videoRepo.UpdateStatus(ctx, videoID, novel.VideoStatusFailed, err.Error()); updateErr != nil {
+					log.Error().
+						Err(updateErr).
+						Str("video_id", videoID).
+						Msg("更新视频状态失败")
+				}
 				continue
 			}
 		}
 	}()
 
-	// 5. 立即返回（异步执行）
-	return []string{}, nil
+	// 6. 立即返回 video IDs（异步执行）
+	return videoIDs, nil
 }
 
 // generateVideoForShot 为单个 shot 生成视频
-func (s *novelService) generateVideoForShot(ctx context.Context, shot *novel.Shot, chapter *novel.Chapter, version int) (string, error) {
-	// 检查 shot 是否有 video_prompt
-	if shot.VideoPrompt == "" {
-		return "", fmt.Errorf("shot %s has no video_prompt", shot.ID)
+// videoID: 已创建的视频记录ID
+func (s *novelService) generateVideoForShot(ctx context.Context, videoID string, shot *novel.Shot, chapter *novel.Chapter, version int) error {
+	// 1. 更新状态为 processing
+	if err := s.videoRepo.UpdateStatus(ctx, videoID, novel.VideoStatusProcessing, ""); err != nil {
+		return fmt.Errorf("update video status to processing: %w", err)
 	}
 
-	// 1. 获取 shot 的首图（优先）或末图
+	// 2. 检查 shot 是否有 video_prompt
+	if shot.VideoPrompt == "" {
+		return fmt.Errorf("shot %s has no video_prompt", shot.ID)
+	}
+
+	// 3. 获取 shot 的首图（优先）或末图
 	var image *novel.Image
 
 	// 优先使用首图
@@ -140,29 +192,29 @@ func (s *novelService) generateVideoForShot(ctx context.Context, shot *novel.Sho
 	}
 
 	if image == nil {
-		return "", fmt.Errorf("shot %s has no image (first or last)", shot.ID)
+		return fmt.Errorf("shot %s has no image (first or last)", shot.ID)
 	}
 
-	// 2. 下载图片
+	// 4. 下载图片
 	downloadReq := service.DownloadFileRequest{
 		ResourceID: image.ImageResourceID,
 	}
 	downloadResult, err := s.resourceService.DownloadFile(ctx, &downloadReq)
 	if err != nil {
-		return "", fmt.Errorf("download image: %w", err)
+		return fmt.Errorf("download image: %w", err)
 	}
 
-	// 3. 读取图片数据并转换为 base64 data URL
+	// 5. 读取图片数据并转换为 base64 data URL
 	imageData, err := io.ReadAll(downloadResult.Data)
 	if err != nil {
-		return "", fmt.Errorf("read image data: %w", err)
+		return fmt.Errorf("read image data: %w", err)
 	}
 	defer downloadResult.Data.Close()
 
 	// 转换为 base64 data URL
 	imageDataURL := fmt.Sprintf("data:image/jpeg;base64,%s", base64.StdEncoding.EncodeToString(imageData))
 
-	// 4. 使用 VideoProvider 生成视频
+	// 6. 使用 VideoProvider 生成视频
 	// 视频时长：根据 shot.Duration，最大 12 秒
 	duration := int(shot.Duration)
 	if duration <= 0 {
@@ -174,10 +226,10 @@ func (s *novelService) generateVideoForShot(ctx context.Context, shot *novel.Sho
 
 	videoData, err := s.videoProvider.GenerateVideoFromImage(ctx, imageDataURL, duration, shot.VideoPrompt)
 	if err != nil {
-		return "", fmt.Errorf("generate video: %w", err)
+		return fmt.Errorf("generate video: %w", err)
 	}
 
-	// 5. 上传视频文件到资源服务
+	// 7. 上传视频文件到资源服务
 	uploadReq := service.UploadFileRequest{
 		FileName:    fmt.Sprintf("video_%s.mp4", id.New()),
 		ContentType: "video/mp4",
@@ -187,29 +239,17 @@ func (s *novelService) generateVideoForShot(ctx context.Context, shot *novel.Sho
 
 	uploadResult, err := s.resourceService.UploadFile(ctx, &uploadReq)
 	if err != nil {
-		return "", fmt.Errorf("upload video: %w", err)
+		return fmt.Errorf("upload video: %w", err)
 	}
 
-	// 6. 创建视频记录
-	videoID := id.New()
-	video := &novel.Video{
-		ID:              videoID,
-		NovelID:         chapter.NovelID,
-		UserID:          chapter.UserID,
-		VideoType:       novel.VideoTypeShot,
-		ShotID:          shot.ID,
-		ChapterID:       chapter.ID,
-		VideoResourceID: uploadResult.ResourceID,
-		Duration:        float64(duration),
-		Prompt:          shot.VideoPrompt,
-		Version:         version,
-		Status:          novel.VideoStatusCompleted,
-		CreatedAt:       time.Now(),
-		UpdatedAt:       time.Now(),
+	// 8. 更新视频记录（设置 resource_id、duration、prompt 和状态）
+	if err := s.videoRepo.UpdateVideoResourceID(ctx, videoID, uploadResult.ResourceID, float64(duration), shot.VideoPrompt); err != nil {
+		return fmt.Errorf("update video resource: %w", err)
 	}
 
-	if err := s.videoRepo.Create(ctx, video); err != nil {
-		return "", fmt.Errorf("create video record: %w", err)
+	// 9. 更新状态为 completed
+	if err := s.videoRepo.UpdateStatus(ctx, videoID, novel.VideoStatusCompleted, ""); err != nil {
+		return fmt.Errorf("update video status to completed: %w", err)
 	}
 
 	log.Info().
@@ -219,14 +259,14 @@ func (s *novelService) generateVideoForShot(ctx context.Context, shot *novel.Sho
 		Float64("duration", float64(duration)).
 		Msg("视频生成成功")
 
-	return videoID, nil
+	return nil
 }
 
 // generateNarrationVideosForChapter_old 旧版本（已废弃）
 func (s *novelService) generateNarrationVideosForChapter_old(ctx context.Context, chapterID string) ([]string, error) {
 	// 1. 从章节直接查询场景
 	scenes, err := s.sceneRepo.FindByChapterID(ctx, chapterID)
-	if err != nil {
+			if err != nil {
 		return nil, fmt.Errorf("find scenes: %w", err)
 	}
 
@@ -246,7 +286,7 @@ func (s *novelService) generateNarrationVideosForChapter_old(ctx context.Context
 	for _, scene := range scenes {
 		// 查询该场景下的所有镜头
 		shots, err := s.shotRepo.FindBySceneID(ctx, scene.ID)
-		if err != nil {
+	if err != nil {
 			continue
 		}
 
@@ -821,14 +861,80 @@ func (s *novelService) getNextVideoVersion(ctx context.Context, chapterID string
 	if baseVersion > 0 {
 		if baseVersion > maxVersion {
 			return baseVersion, nil
-		}
-		return maxVersion + 1, nil
+				}
+				return maxVersion + 1, nil
 	}
 
 	if maxVersion == 0 {
 		return 1, nil
 	}
 	return maxVersion + 1, nil
+}
+
+// GenerateVideoForShot 为单个镜头生成视频
+func (s *novelService) GenerateVideoForShot(ctx context.Context, shotID string) (string, error) {
+	// 1. 获取镜头信息
+	shot, err := s.shotRepo.FindByID(ctx, shotID)
+	if err != nil {
+		return "", fmt.Errorf("find shot: %w", err)
+	}
+
+	// 2. 获取章节信息
+	chapter, err := s.chapterRepo.FindByID(ctx, shot.ChapterID)
+	if err != nil {
+		return "", fmt.Errorf("find chapter: %w", err)
+	}
+
+	// 3. 获取下一个视频版本号
+	nextVersion, err := s.getNextVideoVersion(ctx, shot.ChapterID, shot.Version)
+	if err != nil {
+		return "", fmt.Errorf("get next video version: %w", err)
+	}
+
+	// 4. 先创建视频记录（状态为 pending）
+	videoID := id.New()
+	video := &novel.Video{
+		ID:        videoID,
+		NovelID:   chapter.NovelID,
+		UserID:    chapter.UserID,
+		VideoType: novel.VideoTypeShot,
+		ShotID:    shot.ID,
+		ChapterID: chapter.ID,
+		Version:   nextVersion,
+		Status:    novel.VideoStatusPending,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	if err := s.videoRepo.Create(ctx, video); err != nil {
+		return "", fmt.Errorf("create video record: %w", err)
+	}
+
+	// 5. 异步生成视频
+	go func() {
+		ctx := context.Background()
+		if err := s.generateVideoForShot(ctx, videoID, shot, chapter, nextVersion); err != nil {
+			log.Error().
+				Err(err).
+				Str("shot_id", shotID).
+				Str("video_id", videoID).
+				Msg("生成视频失败")
+			// 更新状态为失败
+			if updateErr := s.videoRepo.UpdateStatus(ctx, videoID, novel.VideoStatusFailed, err.Error()); updateErr != nil {
+				log.Error().
+					Err(updateErr).
+					Str("video_id", videoID).
+					Msg("更新视频状态失败")
+			}
+		}
+	}()
+
+	return videoID, nil
+}
+
+// GetVideosByShot 获取镜头的所有视频
+func (s *novelService) GetVideosByShot(ctx context.Context, shotID string) ([]*novel.Video, error) {
+	return s.videoRepo.FindByShotID(ctx, shotID)
 }
 
 // getFinishVideoPath 获取 finish.mp4 文件路径

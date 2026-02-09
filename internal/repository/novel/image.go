@@ -108,12 +108,15 @@ func (r *ImageRepo) FindByPropID(ctx context.Context, propID string) ([]*novel.I
 }
 
 // FindByShotIDAndTypeAndVersion 根据镜头ID、图片类型和版本号查询图片
+// 如果 version <= 0，则查询所有版本
 func (r *ImageRepo) FindByShotIDAndTypeAndVersion(ctx context.Context, shotID string, imageType novel.ImageType, version int) ([]*novel.Image, error) {
 	filter := bson.M{
 		"shot_id":    shotID,
 		"image_type": imageType,
-		"version":    version,
 		"deleted_at": nil,
+	}
+	if version > 0 {
+		filter["version"] = version
 	}
 	opts := options.Find().SetSort(bson.M{"created_at": -1})
 	cur, err := r.coll.Find(ctx, filter, opts)

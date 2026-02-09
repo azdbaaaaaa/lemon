@@ -87,19 +87,21 @@ func toSubtitleInfo(s *novel.Subtitle) SubtitleInfo {
 
 // ImageInfo 图片信息 DTO
 type ImageInfo struct {
-	ID              string `json:"id"`
-	ChapterID        string `json:"chapter_id"`
-	NarrationID      string `json:"narration_id"`
-	SceneNumber      string `json:"scene_number"`
-	ShotNumber       string `json:"shot_number"`
-	ImageResourceID  string `json:"image_resource_id"`
-	CharacterName    string `json:"character_name"`
-	Prompt           string `json:"prompt,omitempty"`
-	Version          int    `json:"version"`
-	Status           string `json:"status"`
-	Sequence         int    `json:"sequence"`
-	CreatedAt        string `json:"created_at"`
-	UpdatedAt        string `json:"updated_at"`
+	ID                      string `json:"id"`
+	ChapterID              string `json:"chapter_id"`
+	NarrationID            string `json:"narration_id"`
+	SceneNumber            string `json:"scene_number"`
+	ShotNumber             string `json:"shot_number"`
+	ImageResourceID        string `json:"image_resource_id"`
+	ImageURL               string `json:"image_url,omitempty"`                // 图片的直接访问URL
+	CharacterName          string `json:"character_name"`
+	CharacterImageSubtype  string `json:"character_image_subtype,omitempty"`   // 角色图片细分类：front（正视图）、three_view（三视图）、detail（细节图）
+	Prompt                 string `json:"prompt,omitempty"`
+	Version                int    `json:"version"`
+	Status                 string `json:"status"`
+	Sequence               int    `json:"sequence"`
+	CreatedAt              string `json:"created_at"`
+	UpdatedAt              string `json:"updated_at"`
 }
 
 func toImageInfo(i *novel.Image) ImageInfo {
@@ -121,9 +123,9 @@ func toImageInfo(i *novel.Image) ImageInfo {
 }
 
 // ListAudiosByNarration 列出解说的音频列表（可选 version）
-// @Router /api/v1/narrations/{narration_id}/audios [get]
+// @Router /api/v1/narrations/audios [get]
 func (h *Handler) ListAudiosByNarration(c *gin.Context) {
-	narrationID := c.Param("narration_id")
+	narrationID := c.Query("narration_id")
 	if narrationID == "" {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Code: 40001, Message: "narration_id is required"})
 		return
@@ -161,9 +163,9 @@ func (h *Handler) ListAudiosByNarration(c *gin.Context) {
 }
 
 // ListSubtitlesByNarration 列出解说的字幕列表（可选 version）
-// @Router /api/v1/narrations/{narration_id}/subtitles [get]
+// @Router /api/v1/narrations/subtitles [get]
 func (h *Handler) ListSubtitlesByNarration(c *gin.Context) {
-	narrationID := c.Param("narration_id")
+	narrationID := c.Query("narration_id")
 	if narrationID == "" {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Code: 40001, Message: "narration_id is required"})
 		return
@@ -193,9 +195,9 @@ func (h *Handler) ListSubtitlesByNarration(c *gin.Context) {
 }
 
 // ListImagesByNarration 列出解说的图片列表（可选 version）
-// @Router /api/v1/narrations/{narration_id}/images [get]
+// @Router /api/v1/narrations/images [get]
 func (h *Handler) ListImagesByNarration(c *gin.Context) {
-	narrationID := c.Param("narration_id")
+	narrationID := c.Query("narration_id")
 	if narrationID == "" {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Code: 40001, Message: "narration_id is required"})
 		return
@@ -225,9 +227,9 @@ func (h *Handler) ListImagesByNarration(c *gin.Context) {
 }
 
 // ListVideosByChapter 列出章节视频列表（可选 version）
-// @Router /api/v1/novels/chapters/{chapter_id}/videos [get]
+// @Router /api/v1/novels/chapters/videos [get]
 func (h *Handler) ListVideosByChapter(c *gin.Context) {
-	chapterID := c.Param("chapter_id")
+	chapterID := c.Query("chapter_id")
 	if chapterID == "" {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Code: 40001, Message: "chapter_id is required"})
 		return
@@ -253,9 +255,9 @@ func (h *Handler) ListVideosByChapter(c *gin.Context) {
 }
 
 // ListAudiosByChapter 列出章节音频列表（可选 version）
-// @Router /api/v1/chapters/{chapter_id}/audios [get]
+// @Router /api/v1/chapters/audios [get]
 func (h *Handler) ListAudiosByChapter(c *gin.Context) {
-	chapterID := c.Param("chapter_id")
+	chapterID := c.Query("chapter_id")
 	if chapterID == "" {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Code: 40001, Message: "chapter_id is required"})
 		return

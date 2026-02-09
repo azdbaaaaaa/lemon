@@ -32,6 +32,12 @@ type AudioService interface {
 
 	// ListAudiosByChapter 获取章节的音频列表（可指定版本；version<=0 则取最新版本）
 	ListAudiosByChapter(ctx context.Context, chapterID string, version int) ([]*novel.Audio, int, error)
+
+	// GenerateAudioForShot 为单个镜头生成音频
+	GenerateAudioForShot(ctx context.Context, shotID string) (string, error)
+
+	// GetAudiosByShot 获取镜头的所有音频
+	GetAudiosByShot(ctx context.Context, shotID string) ([]*novel.Audio, error)
 }
 
 // GenerateAudiosForNarration 为章节解说生成所有章节音频片段
@@ -277,4 +283,33 @@ func (s *novelService) ListAudiosByChapter(ctx context.Context, chapterID string
 	}
 
 	return allAudios, returnVersion, nil
+}
+
+// GenerateAudioForShot 为单个镜头生成音频
+func (s *novelService) GenerateAudioForShot(ctx context.Context, shotID string) (string, error) {
+	// 1. 获取镜头信息
+	shot, err := s.shotRepo.FindByID(ctx, shotID)
+	if err != nil {
+		return "", fmt.Errorf("find shot: %w", err)
+	}
+
+	// 2. 获取章节信息
+	chapter, err := s.chapterRepo.FindByID(ctx, shot.ChapterID)
+	if err != nil {
+		return "", fmt.Errorf("find chapter: %w", err)
+	}
+
+	// 3. 获取下一个音频版本号
+	nextVersion, err := s.getNextAudioVersion(ctx, shot.ChapterID, shot.Version)
+	if err != nil {
+		return "", fmt.Errorf("get next audio version: %w", err)
+	}
+
+	// 4. 生成音频
+	return s.generateAudioForShot(ctx, shot, chapter, nextVersion)
+}
+
+// GetAudiosByShot 获取镜头的所有音频
+func (s *novelService) GetAudiosByShot(ctx context.Context, shotID string) ([]*novel.Audio, error) {
+	return s.audioRepo.FindByShotID(ctx, shotID)
 }

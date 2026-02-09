@@ -8,7 +8,7 @@ import (
 
 // GenerateImagesRequest 生成图片请求
 type GenerateImagesRequest struct {
-	NarrationID string `json:"narration_id" uri:"narration_id" binding:"required"` // 解说ID（必填）
+	NarrationID string `json:"narration_id" binding:"required"` // 解说ID（必填）
 }
 
 // GenerateImagesResponseData 生成图片响应数据
@@ -28,10 +28,10 @@ type GenerateImagesResponseData struct {
 // @Success      200           {object}  map[string]interface{}  "成功响应"  "{\"code\": 0, \"message\": \"图片生成任务已提交\", \"data\": {\"image_ids\": [\"...\"], \"count\": 1, \"narration_id\": \"...\"}}"
 // @Failure      400           {object}  ErrorResponse  "请求参数错误"
 // @Failure      500           {object}  ErrorResponse  "服务器内部错误"
-// @Router       /api/v1/narrations/{narration_id}/images [post]
+// @Router       /api/v1/narrations/images [post]
 func (h *Handler) GenerateImages(c *gin.Context) {
 	var req GenerateImagesRequest
-	if err := c.ShouldBindUri(&req); err != nil {
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{
 			Code:    40001,
 			Message: "Invalid narration_id",
@@ -92,9 +92,9 @@ type GetImageVersionsResponseData struct {
 // @Success      200         {object}  map[string]interface{}  "成功响应"  "{\"code\": 0, \"message\": \"获取成功\", \"data\": {\"chapter_id\": \"...\", \"versions\": [1, 2, 3]}}"
 // @Failure      400         {object}  ErrorResponse  "请求参数错误"
 // @Failure      500         {object}  ErrorResponse  "服务器内部错误"
-// @Router       /api/v1/novels/chapters/{chapter_id}/images/versions [get]
+// @Router       /api/v1/novels/chapters/images/versions [get]
 func (h *Handler) GetImageVersions(c *gin.Context) {
-	chapterID := c.Param("chapter_id")
+	chapterID := c.Query("chapter_id")
 	if chapterID == "" {
 		c.JSON(http.StatusBadRequest, ErrorResponse{
 			Code:    40001,

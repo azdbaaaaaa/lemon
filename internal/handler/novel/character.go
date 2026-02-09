@@ -183,6 +183,144 @@ func (h *Handler) GetCharactersByNovelID(c *gin.Context) {
 	})
 }
 
+// GenerateCharactersFromNovelRequest 从小说生成角色请求
+type GenerateCharactersFromNovelRequest struct {
+	NovelID string `json:"novel_id" binding:"required"` // 小说ID（必填）
+}
+
+// GenerateCharactersFromNovelResponseData 从小说生成角色响应数据
+type GenerateCharactersFromNovelResponseData struct {
+	NovelID string `json:"novel_id"` // 小说ID
+	Message string `json:"message"`   // 响应消息
+}
+
+// GenerateCharactersFromNovel 基于整个小说内容生成角色和道具
+// @Summary      从小说生成角色和道具
+// @Description  基于整个小说的所有章节内容，提取主要角色和重要道具，并生成图片提示词
+// @Tags         内容管理
+// @Accept       json
+// @Produce      json
+// @Param        request  body      GenerateCharactersFromNovelRequest  true  "生成角色和道具请求"
+// @Success      200      {object}  map[string]interface{}  "成功响应"
+// @Failure      400      {object}  httputil.ErrorResponse  "请求参数错误"
+// @Failure      500      {object}  httputil.ErrorResponse  "服务器内部错误"
+// @Router       /api/v1/characters/generate-from-novel [post]
+func (h *Handler) GenerateCharactersFromNovel(c *gin.Context) {
+	var req GenerateCharactersFromNovelRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, httputil.ErrorResponse{
+			Code:    40001,
+			Message: "Invalid request body",
+			Detail:  err.Error(),
+		})
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	// 调用Service层
+	err := h.novelService.GenerateCharactersFromNovel(ctx, req.NovelID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, httputil.ErrorResponse{
+			Code:    50001,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "角色和道具生成成功",
+		"data": GenerateCharactersFromNovelResponseData{
+			NovelID: req.NovelID,
+			Message: "角色和道具已生成，请刷新查看",
+		},
+	})
+}
+
+// GetCharacterImagesRequest 获取角色图片请求
+type GetCharacterImagesRequest struct {
+	CharacterID string `form:"character_id" binding:"required"` // 角色ID（必填）
+}
+
+// GetCharacterImages 获取角色的所有图片
+// @Summary      获取角色图片列表
+// @Description  获取指定角色的所有图片（包括各个角度的图片）
+// @Tags         内容管理
+// @Accept       json
+// @Produce      json
+// @Param        character_id  query     string  true  "角色ID"
+// @Success      200           {object}  map[string]interface{}  "成功响应"
+// @Failure      400           {object}  httputil.ErrorResponse  "请求参数错误"
+// @Failure      500           {object}  httputil.ErrorResponse  "服务器内部错误"
+// @Router       /api/v1/characters/images [get]
+func (h *Handler) GetCharacterImages(c *gin.Context) {
+	characterID := c.Query("character_id")
+	if characterID == "" {
+		c.JSON(http.StatusBadRequest, httputil.ErrorResponse{
+			Code:    40001,
+			Message: "character_id is required",
+		})
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	// 调用Service层
+	images, err := h.novelService.GetCharacterImages(ctx, characterID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, httputil.ErrorResponse{
+			Code:    50001,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	// 转换为 DTO 并获取图片URL
+	imageInfos := make([]ImageInfo, 0, len(images))
+	for _, img := range images {
+		// 获取图片URL
+		var imageURL string
+		if img.ImageResourceID != "" {
+			result, err := h.resourceService.GetDownloadURL(ctx, &service.GetDownloadURLRequest{
+				UserID:     "",
+				ResourceID: img.ImageResourceID,
+				ExpiresIn:  24 * time.Hour,
+			})
+			if err == nil && result != nil {
+				imageURL = result.DownloadURL
+			}
+		}
+		imageInfos = append(imageInfos, ImageInfo{
+			ID:                    img.ID,
+			ChapterID:             "",
+			NarrationID:           "",
+			SceneNumber:           "",
+			ShotNumber:            "",
+			ImageResourceID:       img.ImageResourceID,
+			ImageURL:              imageURL,
+			CharacterName:         "",
+			CharacterImageSubtype: string(img.CharacterImageSubtype),
+			Prompt:                img.Prompt,
+			Version:               img.Version,
+			Status:                string(img.Status),
+			Sequence:              0,
+			CreatedAt:             img.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:             img.UpdatedAt.Format(time.RFC3339),
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "获取成功",
+		"data": gin.H{
+			"character_id": characterID,
+			"images":       imageInfos,
+			"count":        len(imageInfos),
+		},
+	})
+}
+
 // GetCharacterByNameRequest 根据名称获取角色请求
 type GetCharacterByNameRequest struct {
 	NovelID string `form:"novel_id" binding:"required"` // 小说ID（必填）

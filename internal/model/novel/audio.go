@@ -79,7 +79,7 @@ func (a *Audio) EnsureIndexes(ctx context.Context, db *mongo.Database) error {
 		{
 			// 分镜音频索引（支持多版本）
 			Keys:    bson.D{{Key: "shot_id", Value: 1}, {Key: "audio_type", Value: 1}, {Key: "version", Value: 1}},
-			Options: options.Index().SetUnique(true).SetPartialFilterExpression(bson.M{"shot_id": bson.M{"$exists": true, "$ne": ""}, "audio_type": AudioTypeShot}).SetName("idx_shot_type_version_unique"),
+			Options: options.Index().SetUnique(true).SetPartialFilterExpression(bson.M{"shot_id": bson.M{"$exists": true, "$type": "string"}, "audio_type": AudioTypeShot}).SetName("idx_shot_type_version_unique"),
 		},
 		{
 			Keys:    bson.D{{Key: "shot_id", Value: 1}},
