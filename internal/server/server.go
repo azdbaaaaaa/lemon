@@ -276,14 +276,17 @@ func (s *Server) setupRoutes() {
 						contentGroup.PUT("/scenes/version", contentHdl.SetActiveSceneVersion)
 
 						// 镜头管理接口
-						contentGroup.GET("/shots", contentHdl.GetShots) // 支持 chapter_id（列表）或 shot_id（详情）
-						contentGroup.PUT("/shots", contentHdl.UpdateShot)
+						// 注意：更具体的路由要放在更通用的路由之前
 						contentGroup.POST("/shots/images", contentHdl.GenerateShotImages)
 						contentGroup.GET("/shots/images", contentHdl.GetShotImages)
 						contentGroup.POST("/shots/audio", contentHdl.GenerateShotAudio)
 						contentGroup.GET("/shots/audios", contentHdl.GetShotAudios)
+						contentGroup.POST("/shots/subtitle", contentHdl.GenerateShotSubtitle)
+						contentGroup.GET("/shots/subtitles", contentHdl.GetSubtitlesByShot)
 						contentGroup.POST("/shots/video", contentHdl.GenerateShotVideo)
 						contentGroup.GET("/shots/videos", contentHdl.GetShotVideos)
+						contentGroup.GET("/shots", contentHdl.GetShots) // 支持 chapter_id（列表）或 shot_id（详情）
+						contentGroup.PUT("/shots", contentHdl.UpdateShot)
 
 						// 角色管理接口
 						contentGroup.GET("/characters", contentHdl.GetCharactersByNovelID)

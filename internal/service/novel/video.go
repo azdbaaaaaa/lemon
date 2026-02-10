@@ -177,17 +177,18 @@ func (s *novelService) generateVideoForShot(ctx context.Context, videoID string,
 	}
 
 	// 3. 获取 shot 的首图（优先）或末图
+	// 注意：不指定版本号（传入0），查询所有版本的图片，取最新的
 	var image *novel.Image
 
 	// 优先使用首图
-	firstImages, err := s.imageRepo.FindByShotIDAndTypeAndVersion(ctx, shot.ID, novel.ImageTypeShotFirst, version)
+	firstImages, err := s.imageRepo.FindByShotIDAndTypeAndVersion(ctx, shot.ID, novel.ImageTypeShotFirst, 0)
 	if err == nil && len(firstImages) > 0 {
-		image = firstImages[0]
+		image = firstImages[0] // 已按创建时间倒序，取最新的
 	} else {
 		// 如果没有首图，使用末图
-		lastImages, err := s.imageRepo.FindByShotIDAndTypeAndVersion(ctx, shot.ID, novel.ImageTypeShotLast, version)
+		lastImages, err := s.imageRepo.FindByShotIDAndTypeAndVersion(ctx, shot.ID, novel.ImageTypeShotLast, 0)
 		if err == nil && len(lastImages) > 0 {
-			image = lastImages[0]
+			image = lastImages[0] // 已按创建时间倒序，取最新的
 		}
 	}
 
@@ -618,19 +619,19 @@ func adjustDialogueTime(dialogueLine string, timeOffset float64) string {
 
 // GenerateFinalVideoForChapter 生成章节的最终完整视频
 // 对应 Python: concat_finish_video.py
+// version<=0 时会自动选择该章节最新的视频版本
 func (s *novelService) GenerateFinalVideoForChapter(ctx context.Context, chapterID string) (string, error) {
-	// TODO: 重构此方法，不再依赖 narration
-	return "", fmt.Errorf("narration module has been removed, this method needs to be refactored")
+	return s.generateFinalVideoForChapter(ctx, chapterID, 0)
 }
 
+// GenerateFinalVideoForChapterWithVersion 指定视频版本号生成最终视频
 func (s *novelService) GenerateFinalVideoForChapterWithVersion(ctx context.Context, chapterID string, version int) (string, error) {
-	// TODO: 重构此方法，不再依赖 narration
-	return "", fmt.Errorf("narration module has been removed, this method needs to be refactored")
+	return s.generateFinalVideoForChapter(ctx, chapterID, version)
 }
 
+// generateFinalVideoForChapter 内部实现，复用旧的合并逻辑但基于新的 Shot 视频模型
 func (s *novelService) generateFinalVideoForChapter(ctx context.Context, chapterID string, version int) (string, error) {
-	// TODO: 重构此方法，不再依赖 narration
-	return "", fmt.Errorf("narration module has been removed, this method needs to be refactored")
+	return s.generateFinalVideoForChapter_old(ctx, chapterID, version)
 }
 
 func (s *novelService) generateFinalVideoForChapter_old(ctx context.Context, chapterID string, version int) (string, error) {
@@ -640,44 +641,69 @@ func (s *novelService) generateFinalVideoForChapter_old(ctx context.Context, cha
 		return "", fmt.Errorf("find chapter: %w", err)
 	}
 
-	// 2. 确定要合并的版本号：version<=0 则取最新版本
-	// TODO: 重构此方法，不再依赖 narration
-	videoVersion := version
-	if videoVersion <= 0 {
-		videoVersion = 1 // 暂时返回1
-	}
-
-	// 2.5. 只获取指定版本的分镜视频
-	// TODO: 重构此方法，使用新的查询方式
-	narrationVideos, err := s.videoRepo.FindByShotID(ctx, "") // 需要重构
+	// 2. 获取指定版本的章节视频（version<=0 则取最新版本）
+	allVideos, resolvedVersion, err := s.ListVideosByChapter(ctx, chapterID, version)
 	if err != nil {
-		return "", fmt.Errorf("find videos: %w", err)
+		return "", fmt.Errorf("list videos: %w", err)
 	}
 
-	// 过滤出分镜视频类型的视频
-	var filteredNarrationVideos []*novel.Video
-	for _, video := range narrationVideos {
-		if video.VideoType == novel.VideoTypeShot {
-			filteredNarrationVideos = append(filteredNarrationVideos, video)
+	videoVersion := resolvedVersion
+
+	// 2.5. 过滤出分镜视频类型且已完成的视频
+	var shotVideos []*novel.Video
+	for _, video := range allVideos {
+		if video.VideoType == novel.VideoTypeShot && video.Status == novel.VideoStatusCompleted {
+			shotVideos = append(shotVideos, video)
 		}
 	}
 
-	if len(filteredNarrationVideos) == 0 {
+	if len(shotVideos) == 0 {
 		return "", fmt.Errorf("no shot videos found for chapter %s, version %d", chapterID, videoVersion)
 	}
 
-	// 按创建时间排序（Video 模型已经没有 Sequence 字段）
-	sort.Slice(filteredNarrationVideos, func(i, j int) bool {
-		return filteredNarrationVideos[i].CreatedAt.Before(filteredNarrationVideos[j].CreatedAt)
-	})
+	// 2.6 为了保证合并顺序，尽量按镜头 sequence 排序；如果获取失败则按创建时间排序
+	if shots, err := s.shotRepo.FindByChapterID(ctx, chapterID); err == nil {
+		seqMap := make(map[string]int, len(shots))
+		for _, sh := range shots {
+			// 同一个 shot 可能有多个版本，只保留第一次出现的 sequence
+			if _, exists := seqMap[sh.ID]; !exists {
+				seqMap[sh.ID] = sh.Sequence
+			}
+		}
 
-	narrationVideos = filteredNarrationVideos
+		sort.Slice(shotVideos, func(i, j int) bool {
+			si := seqMap[shotVideos[i].ShotID]
+			sj := seqMap[shotVideos[j].ShotID]
+
+			// 都没有 sequence，用创建时间兜底
+			if si == 0 && sj == 0 {
+				return shotVideos[i].CreatedAt.Before(shotVideos[j].CreatedAt)
+			}
+			// 只有一边有 sequence，优先有 sequence 的
+			if si == 0 {
+				return false
+			}
+			if sj == 0 {
+				return true
+			}
+			// 都有 sequence，按 sequence 排序
+			if si == sj {
+				return shotVideos[i].CreatedAt.Before(shotVideos[j].CreatedAt)
+			}
+			return si < sj
+		})
+	} else {
+		// 回退：按创建时间排序
+		sort.Slice(shotVideos, func(i, j int) bool {
+			return shotVideos[i].CreatedAt.Before(shotVideos[j].CreatedAt)
+		})
+	}
 
 	log.Info().
 		Str("chapter_id", chapterID).
 		Int("version", videoVersion).
-		Int("narration_video_count", len(narrationVideos)).
-		Msg("使用指定版本的 narration 视频进行合并")
+		Int("shot_video_count", len(shotVideos)).
+		Msg("使用指定版本的 shot 视频进行合并，生成章节最终视频")
 
 	// 3. 初始化 FFmpeg 客户端
 	ffmpegClient := ffmpeg.NewClient()
@@ -685,7 +711,7 @@ func (s *novelService) generateFinalVideoForChapter_old(ctx context.Context, cha
 	// 4. 下载所有视频到临时文件
 	tmpDir := os.TempDir()
 	var videoPaths []string
-	for idx, video := range narrationVideos {
+	for idx, video := range shotVideos {
 		downloadReq := &service.DownloadFileRequest{
 			ResourceID: video.VideoResourceID,
 			UserID:     chapter.UserID,
@@ -797,7 +823,7 @@ func (s *novelService) generateFinalVideoForChapter_old(ctx context.Context, cha
 
 	// 9. 计算总时长
 	var totalDuration float64
-	for _, video := range narrationVideos {
+	for _, video := range shotVideos {
 		totalDuration += video.Duration
 	}
 
@@ -867,9 +893,9 @@ func (s *novelService) getNextVideoVersion(ctx context.Context, chapterID string
 
 	if maxVersion == 0 {
 		return 1, nil
-	}
-	return maxVersion + 1, nil
-}
+				}
+				return maxVersion + 1, nil
+			}
 
 // GenerateVideoForShot 为单个镜头生成视频
 func (s *novelService) GenerateVideoForShot(ctx context.Context, shotID string) (string, error) {

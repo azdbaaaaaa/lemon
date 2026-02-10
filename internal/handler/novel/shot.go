@@ -1,7 +1,9 @@
 package novel
 
 import (
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -88,6 +90,16 @@ func (h *Handler) GetShotImages(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
+	// 获取镜头信息（用于填充场景ID、章节ID、镜头序号等）
+	shot, err := h.novelService.GetShotByID(ctx, shotID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Code:    50001,
+			Message: err.Error(),
+		})
+		return
+	}
+
 	// 调用Service层
 	images, err := h.novelService.GetShotImages(ctx, shotID)
 	if err != nil {
@@ -98,10 +110,27 @@ func (h *Handler) GetShotImages(c *gin.Context) {
 		return
 	}
 
-	// 转换为 DTO
+	// 转换为 DTO，并获取图片URL
 	imageInfos := make([]ImageInfo, 0, len(images))
 	for _, img := range images {
-		imageInfos = append(imageInfos, toImageInfo(img))
+		imageInfo := toImageInfo(img)
+		// 填充与场景/镜头相关的字段，便于前端按场景查询
+		imageInfo.ChapterID = shot.ChapterID
+		// 旧字段复用：SceneNumber / ShotNumber 用字符串表示序号
+		imageInfo.ShotNumber = fmt.Sprintf("%d", shot.Sequence)
+
+		// 获取图片URL
+		if img.ImageResourceID != "" {
+			imageURL, _ := h.resourceService.GetDownloadURL(ctx, &service.GetDownloadURLRequest{
+				ResourceID: img.ImageResourceID,
+			})
+			if imageURL != nil {
+				imageInfo.ImageURL = imageURL.DownloadURL
+			}
+		}
+		// 不返回 resource_id，只返回 URL
+		imageInfo.ImageResourceID = ""
+		imageInfos = append(imageInfos, imageInfo)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -214,7 +243,10 @@ func (h *Handler) GetShotAudios(c *gin.Context) {
 		if audioURL != nil {
 			url = audioURL.DownloadURL
 		}
-		audioInfos = append(audioInfos, toAudioInfo(a, url))
+		audioInfo := toAudioInfo(a, url)
+		// 不返回 resource_id，只返回 URL
+		audioInfo.AudioResourceID = ""
+		audioInfos = append(audioInfos, audioInfo)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -279,6 +311,76 @@ func (h *Handler) GenerateShotVideo(c *gin.Context) {
 		"data": GenerateShotVideoResponseData{
 			VideoID: videoID,
 			ShotID:  req.ShotID,
+		},
+	})
+}
+
+// GenerateShotSubtitleRequest 生成镜头字幕请求
+type GenerateShotSubtitleRequest struct {
+	ShotID string `json:"shot_id" binding:"required"` // 镜头ID（必填）
+}
+
+// GenerateShotSubtitleResponseData 生成镜头字幕响应数据
+type GenerateShotSubtitleResponseData struct {
+	SubtitleID string `json:"subtitle_id"` // 生成的字幕ID
+	ShotID     string `json:"shot_id"`     // 镜头ID
+}
+
+// GenerateShotSubtitle 为单个镜头生成字幕
+// @Summary      生成镜头字幕
+// @Description  为单个镜头生成字幕，需要先有音频记录（包含时间戳数据）
+// @Tags         镜头管理
+// @Accept       json
+// @Produce      json
+// @Param        shot_id  body      string  true  "镜头ID"
+// @Success      200      {object}  map[string]interface{}  "成功响应"
+// @Failure      400      {object}  ErrorResponse  "请求参数错误"
+// @Failure      500      {object}  ErrorResponse  "服务器内部错误"
+// @Router       /api/v1/shots/subtitle [post]
+func (h *Handler) GenerateShotSubtitle(c *gin.Context) {
+	var req GenerateShotSubtitleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Code:    40001,
+			Message: "Invalid shot_id",
+			Detail:  err.Error(),
+		})
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	// 调用Service层
+	subtitleID, err := h.novelService.GenerateSubtitleForShot(ctx, req.ShotID)
+	if err != nil {
+		code := http.StatusInternalServerError
+		errorCode := 50001
+
+		// 根据错误类型设置错误码
+		if strings.Contains(err.Error(), "has no audio") {
+			code = http.StatusBadRequest
+			errorCode = 40002
+		} else if strings.Contains(err.Error(), "has no timestamps") {
+			code = http.StatusBadRequest
+			errorCode = 40003
+		} else if strings.Contains(err.Error(), "find shot") {
+			code = http.StatusNotFound
+			errorCode = 40401
+		}
+
+		c.JSON(code, ErrorResponse{
+			Code:    errorCode,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "字幕生成成功",
+		"data": GenerateShotSubtitleResponseData{
+			SubtitleID: subtitleID,
+			ShotID:     req.ShotID,
 		},
 	})
 }

@@ -66,7 +66,10 @@ func toVideoInfoList(ctx context.Context, videos []*novel.Video, resourceService
 		if videoURL != nil {
 			url = videoURL.DownloadURL
 		}
-		result[i] = toVideoInfo(video, url)
+		info := toVideoInfo(video, url)
+		// 不返回 resource_id，只返回 URL
+		info.VideoResourceID = ""
+		result[i] = info
 	}
 	return result
 }

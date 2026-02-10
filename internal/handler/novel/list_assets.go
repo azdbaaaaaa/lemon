@@ -57,9 +57,11 @@ type SubtitleInfo struct {
 	ID                 string `json:"id"`
 	ChapterID          string `json:"chapter_id"`
 	NarrationID        string `json:"narration_id"`
+	ShotID             string `json:"shot_id,omitempty"`
 	UserID             string `json:"user_id"`
 	Sequence           int    `json:"sequence"`
 	SubtitleResourceID string `json:"subtitle_resource_id"`
+	SubtitleURL        string `json:"subtitle_url,omitempty"` // 字幕的直接访问URL
 	Format             string `json:"format"`
 	Prompt             string `json:"prompt,omitempty"`
 	Version            int    `json:"version"`
@@ -73,9 +75,11 @@ func toSubtitleInfo(s *novel.Subtitle) SubtitleInfo {
 		ID:                 s.ID,
 		ChapterID:          s.ChapterID,
 		NarrationID:        "", // 已删除，保留字段以兼容旧API
+		ShotID:             s.ShotID,
 		UserID:             s.UserID,
 		Sequence:           0, // 已删除，保留字段以兼容旧API
 		SubtitleResourceID: s.SubtitleResourceID,
+		SubtitleURL:        "", // 需要调用 resourceService 获取
 		Format:             string(s.Format),
 		Prompt:             s.Prompt,
 		Version:            s.Version,
@@ -88,10 +92,10 @@ func toSubtitleInfo(s *novel.Subtitle) SubtitleInfo {
 // ImageInfo 图片信息 DTO
 type ImageInfo struct {
 	ID                      string `json:"id"`
-	ChapterID              string `json:"chapter_id"`
-	NarrationID            string `json:"narration_id"`
-	SceneNumber            string `json:"scene_number"`
-	ShotNumber             string `json:"shot_number"`
+	ChapterID               string `json:"chapter_id"`
+	NarrationID             string `json:"narration_id"`
+	SceneNumber             string `json:"scene_number"`
+	ShotNumber              string `json:"shot_number"`
 	ImageResourceID        string `json:"image_resource_id"`
 	ImageURL               string `json:"image_url,omitempty"`                // 图片的直接访问URL
 	CharacterName          string `json:"character_name"`
@@ -106,17 +110,19 @@ type ImageInfo struct {
 
 func toImageInfo(i *novel.Image) ImageInfo {
 	return ImageInfo{
-		ID:             i.ID,
-		ChapterID:       "", // 已删除，保留字段以兼容旧API
-		NarrationID:     "", // 已删除，保留字段以兼容旧API
-		SceneNumber:     "", // 已删除，保留字段以兼容旧API
-		ShotNumber:      "", // 已删除，保留字段以兼容旧API
-		ImageResourceID: i.ImageResourceID,
-		CharacterName:   "", // 已删除，保留字段以兼容旧API
+		ID:               i.ID,
+		ChapterID:        "", // 对于镜头图片，稍后在具体 Handler 中填充
+		NarrationID:      "", // narration 模块已删除，保留字段以兼容旧API
+		SceneNumber:      "", // 对于镜头图片，暂不填充场景序号
+		ShotNumber:       "", // 对于镜头图片，稍后在具体 Handler 中填充
+		ImageResourceID:  i.ImageResourceID,
+		ImageURL:         "", // 由具体 Handler 通过 resourceService 填充
+		CharacterName:    "", // 角色/道具图片时可在对应 Handler 中填充
+		CharacterImageSubtype: string(i.CharacterImageSubtype),
 		Prompt:          i.Prompt,
 		Version:         i.Version,
 		Status:          string(i.Status),
-		Sequence:        0, // 已删除，保留字段以兼容旧API
+		Sequence:        0, // 旧 narration 模块字段，保留以兼容旧API
 		CreatedAt:       i.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:       i.UpdatedAt.Format(time.RFC3339),
 	}
@@ -190,6 +196,48 @@ func (h *Handler) ListSubtitlesByNarration(c *gin.Context) {
 			"version":      resolved,
 			"subtitles":    out,
 			"count":        len(out),
+		},
+	})
+}
+
+// GetSubtitlesByShot 获取镜头的字幕列表
+// @Router /api/v1/shots/subtitles [get]
+func (h *Handler) GetSubtitlesByShot(c *gin.Context) {
+	shotID := c.Query("shot_id")
+	if shotID == "" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Code: 40001, Message: "shot_id is required"})
+		return
+	}
+
+	ctx := c.Request.Context()
+	subs, err := h.novelService.ListSubtitlesByShot(ctx, shotID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Code: 50001, Message: err.Error()})
+		return
+	}
+	out := make([]SubtitleInfo, 0, len(subs))
+	for _, s := range subs {
+		subtitleInfo := toSubtitleInfo(s)
+		// 添加字幕URL
+		if s.SubtitleResourceID != "" {
+			subtitleURL, _ := h.resourceService.GetDownloadURL(ctx, &service.GetDownloadURLRequest{
+				ResourceID: s.SubtitleResourceID,
+			})
+			if subtitleURL != nil {
+				subtitleInfo.SubtitleURL = subtitleURL.DownloadURL
+			}
+		}
+		// 不返回 resource_id，只返回 URL
+		subtitleInfo.SubtitleResourceID = ""
+		out = append(out, subtitleInfo)
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "success",
+		"data": gin.H{
+			"shot_id":   shotID,
+			"subtitles": out,
+			"count":     len(out),
 		},
 	})
 }
