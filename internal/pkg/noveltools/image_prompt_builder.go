@@ -23,36 +23,74 @@ func NewImagePromptBuilder() *ImagePromptBuilder {
 func (b *ImagePromptBuilder) BuildCharacterDescription(character *novel.Character) string {
 	var parts []string
 
-	if character.Gender != "" {
+	// 性别（优先使用 BaseProfile 中的信息）
+	gender := character.Gender
+	if character.BaseProfile != nil && character.BaseProfile.Gender != "" {
+		gender = character.BaseProfile.Gender
+	}
+	if gender != "" {
 		genderDesc := "男性"
-		if character.Gender == "女" {
+		if strings.Contains(gender, "女") {
 			genderDesc = "女性"
 		}
 		parts = append(parts, fmt.Sprintf("一位%s", genderDesc))
 	}
 
-	if character.Appearance != nil {
-		if character.Appearance.Face != "" {
-			parts = append(parts, character.Appearance.Face)
+	// 外貌信息（优先使用 BaseProfile.Appearance）
+	var appearance *novel.CharacterAppearance
+	if character.BaseProfile != nil && character.BaseProfile.Appearance != nil {
+		appearance = character.BaseProfile.Appearance
+	} else if character.Appearance != nil {
+		appearance = character.Appearance
+	}
+
+	if appearance != nil {
+		if appearance.FaceShape != "" {
+			parts = append(parts, appearance.FaceShape)
 		}
-		if character.Appearance.HairStyle != "" && character.Appearance.HairColor != "" {
-			parts = append(parts, fmt.Sprintf("%s%s", character.Appearance.HairColor, character.Appearance.HairStyle))
+		if appearance.FacialFeatures != "" {
+			parts = append(parts, appearance.FacialFeatures)
 		}
-		if character.Appearance.Body != "" {
-			parts = append(parts, character.Appearance.Body)
+		if appearance.HairStyle != "" && appearance.HairColor != "" {
+			parts = append(parts, fmt.Sprintf("%s%s", appearance.HairColor, appearance.HairStyle))
+		}
+		if appearance.SkinTone != "" {
+			parts = append(parts, appearance.SkinTone)
+		}
+		if appearance.SpecialMarks != "" {
+			parts = append(parts, appearance.SpecialMarks)
+		}
+		if appearance.Posture != "" {
+			parts = append(parts, appearance.Posture)
 		}
 	}
 
-	if character.Clothing != nil {
+	// 体型（从 BaseProfile.BodyType）
+	if character.BaseProfile != nil && character.BaseProfile.BodyType != "" {
+		parts = append(parts, character.BaseProfile.BodyType)
+	}
+
+	// 服装信息（优先使用 BaseProfile.Clothing）
+	var clothing *novel.CharacterClothing
+	if character.BaseProfile != nil && character.BaseProfile.Clothing != nil {
+		clothing = character.BaseProfile.Clothing
+	} else if character.Clothing != nil {
+		clothing = character.Clothing
+	}
+
+	if clothing != nil {
 		var clothingParts []string
-		if character.Clothing.Top != "" {
-			clothingParts = append(clothingParts, character.Clothing.Top)
+		if clothing.CommonType != "" {
+			clothingParts = append(clothingParts, clothing.CommonType)
 		}
-		if character.Clothing.Bottom != "" {
-			clothingParts = append(clothingParts, character.Clothing.Bottom)
+		if clothing.ColorPalette != "" {
+			clothingParts = append(clothingParts, clothing.ColorPalette)
 		}
-		if character.Clothing.Accessory != "" && character.Clothing.Accessory != "无其他装饰" {
-			clothingParts = append(clothingParts, character.Clothing.Accessory)
+		if clothing.MaterialStyle != "" {
+			clothingParts = append(clothingParts, clothing.MaterialStyle)
+		}
+		if clothing.EraSetting != "" {
+			clothingParts = append(clothingParts, clothing.EraSetting)
 		}
 		if len(clothingParts) > 0 {
 			parts = append(parts, fmt.Sprintf("身着%s", strings.Join(clothingParts, ", ")))

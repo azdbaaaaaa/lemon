@@ -118,15 +118,6 @@ func (s *novelService) generateCharacterImagesAsync(ctx context.Context, novelEn
 	}
 
 	for _, char := range characters {
-		if char.ImagePrompt == "" {
-			log.Warn().Str("character_id", char.ID).Str("character_name", char.Name).Msg("角色图片提示词为空，跳过")
-			// 更新状态为失败
-			if err := s.characterRepo.UpdateStatus(ctx, char.ID, novel.TaskStatusFailed, "图片提示词为空"); err != nil {
-				log.Warn().Err(err).Str("character_id", char.ID).Msg("更新角色状态失败")
-			}
-			continue
-		}
-
 		// 为每个角色生成三种细分类的图片
 		hasError := false
 		var errorMessages []string
@@ -178,10 +169,92 @@ func (s *novelService) generateCharacterImagesAsync(ctx context.Context, novelEn
 	}
 }
 
+// buildCharacterImagePrompt 基于角色结构化信息和 Prompt 模块生成角色图片提示词
+func (s *novelService) buildCharacterImagePrompt(ctx context.Context, char *novel.Character) (string, error) {
+	if s.promptService == nil {
+		return "", fmt.Errorf("promptService is not initialized")
+	}
+
+	base := char.BaseProfile
+	var appearance *novel.CharacterAppearance
+	var clothing *novel.CharacterClothing
+	var sig *novel.CharacterSignatureElements
+
+	if base != nil {
+		appearance = base.Appearance
+		clothing = base.Clothing
+		sig = base.SignatureElements
+	}
+
+	// 兼容老字段：如果 BaseProfile 为空，则尽量从旧字段补充
+	gender := char.Gender
+	ageRange := char.AgeGroup
+	bodyType := ""
+	if base != nil {
+		if base.Gender != "" {
+			gender = base.Gender
+		}
+		if base.AgeRange != "" {
+			ageRange = base.AgeRange
+		}
+		bodyType = base.BodyType
+	}
+
+	var temperamentKeywords string
+	if base != nil && len(base.VisualPersonalityKeywords) > 0 {
+		temperamentKeywords = strings.Join(base.VisualPersonalityKeywords, ", ")
+	}
+
+	var signatureItem string
+	if sig != nil {
+		if sig.Items != "" {
+			signatureItem = sig.Items
+		} else if sig.Weapon != "" {
+			signatureItem = sig.Weapon
+		} else if sig.Accessories != "" {
+			signatureItem = sig.Accessories
+		}
+	}
+
+	vars := map[string]string{
+		"CHARACTER_NAME":       char.Name,
+		"GENDER":               gender,
+		"AGE_RANGE":            ageRange,
+		"BODY_TYPE":            bodyType,
+		"FACE_SHAPE":           firstNonEmpty(appearance, func(a *novel.CharacterAppearance) string { return a.FaceShape }),
+		"FACIAL_FEATURES":      firstNonEmpty(appearance, func(a *novel.CharacterAppearance) string { return a.FacialFeatures }),
+		"EYE_COLOR":            firstNonEmpty(appearance, func(a *novel.CharacterAppearance) string { return a.EyeColor }),
+		"HAIR_STYLE":           firstNonEmpty(appearance, func(a *novel.CharacterAppearance) string { return a.HairStyle }),
+		"HAIR_COLOR":           firstNonEmpty(appearance, func(a *novel.CharacterAppearance) string { return a.HairColor }),
+		"SKIN_TONE":            firstNonEmpty(appearance, func(a *novel.CharacterAppearance) string { return a.SkinTone }),
+		"SPECIAL_MARKS":        firstNonEmpty(appearance, func(a *novel.CharacterAppearance) string { return a.SpecialMarks }),
+		"CLOTHING_TYPE":        firstNonEmpty(clothing, func(c *novel.CharacterClothing) string { return c.CommonType }),
+		"COLOR_PALETTE":        firstNonEmpty(clothing, func(c *novel.CharacterClothing) string { return c.ColorPalette }),
+		"MATERIAL_STYLE":       firstNonEmpty(clothing, func(c *novel.CharacterClothing) string { return c.MaterialStyle }),
+		"ERA_SETTING":          firstNonEmpty(clothing, func(c *novel.CharacterClothing) string { return c.EraSetting }),
+		"SIGNATURE_ITEM":       signatureItem,
+		"TEMPERAMENT_KEYWORDS": temperamentKeywords,
+	}
+
+	return s.promptService.RenderPrompt(ctx, "character_image", "default", "en-US", vars)
+}
+
+func firstNonEmpty[T any](ptr *T, getter func(*T) string) string {
+	if ptr == nil {
+		return ""
+	}
+	return getter(ptr)
+}
+
 // generateCharacterImage 生成单个角色图片
 func (s *novelService) generateCharacterImage(ctx context.Context, novelEntity *novel.Novel, char *novel.Character, subtype novel.CharacterImageSubtype) (string, error) {
-	// 根据细分类调整提示词
-	prompt := char.ImagePrompt
+	// 基于角色结构化信息和 Prompt 模块生成基础图片提示词
+	basePrompt, err := s.buildCharacterImagePrompt(ctx, char)
+	if err != nil {
+		return "", fmt.Errorf("build character image prompt: %w", err)
+	}
+
+	prompt := basePrompt
 	switch subtype {
 	case novel.CharacterImageSubtypeFront:
 		prompt = prompt + "，正视图"
@@ -290,8 +363,8 @@ func (s *novelService) generatePropImagesAsync(ctx context.Context, novelEntity 
 			if err := s.propRepo.UpdateStatus(ctx, prop.ID, novel.TaskStatusFailed, "图片提示词为空"); err != nil {
 				log.Warn().Err(err).Str("prop_id", prop.ID).Msg("更新道具状态失败")
 			}
-				continue
-			}
+			continue
+		}
 
 		// 检查道具是否已有图片（通过查询 Image 表）
 		existingImages, err := s.imageRepo.FindByPropID(ctx, prop.ID)

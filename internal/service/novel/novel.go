@@ -11,6 +11,7 @@ import (
 	"lemon/internal/pkg/tts"
 	novelrepo "lemon/internal/repository/novel"
 	"lemon/internal/service"
+	promptservice "lemon/internal/service/prompt"
 )
 
 // NovelService 小说服务接口
@@ -43,6 +44,7 @@ type novelService struct {
 	ttsProvider     noveltools.TTSProvider
 	imageProvider   noveltools.ImageProvider
 	videoProvider   noveltools.VideoProvider
+	promptService   promptservice.PromptService
 }
 
 // NewNovelService 创建小说服务
@@ -93,6 +95,12 @@ func NewNovelService(
 		return nil, fmt.Errorf("初始化 Video Provider 失败: %w", err)
 	}
 
+	// 初始化 PromptService（用于加载提示词模板）
+	ps, err := promptservice.NewPromptService(db)
+	if err != nil {
+		return nil, fmt.Errorf("初始化 PromptService 失败: %w", err)
+	}
+
 	return &novelService{
 		resourceService: resourceService,
 		novelRepo:       novelRepo,
@@ -109,5 +117,6 @@ func NewNovelService(
 		ttsProvider:     ttsProvider,
 		imageProvider:   imageProvider,
 		videoProvider:   videoProvider,
+		promptService:   ps,
 	}, nil
 }

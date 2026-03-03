@@ -131,4 +131,3 @@ func createAdmin(ctx context.Context, repo *authrepo.UserRepo, username, email, 
 	return repo.Create(ctx, user)
 }
 
-

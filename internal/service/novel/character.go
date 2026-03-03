@@ -37,48 +37,13 @@ func (s *novelService) GetCharacterByName(ctx context.Context, novelID, name str
 }
 
 // GenerateCharactersFromNovel 基于整个小说内容生成角色和图片提示词
+// 只负责角色提取和落库，不处理道具
 func (s *novelService) GenerateCharactersFromNovel(ctx context.Context, novelID string) error {
-	// 1. 获取小说信息
-	novelEntity, err := s.novelRepo.FindByID(ctx, novelID)
+	jsonContent, err := s.generateCharactersAndPropsJSON(ctx, novelID)
 	if err != nil {
-		return fmt.Errorf("find novel: %w", err)
+		return err
 	}
 
-	// 2. 获取所有章节
-	chapters, err := s.chapterRepo.FindByNovelID(ctx, novelID)
-	if err != nil {
-		return fmt.Errorf("find chapters: %w", err)
-	}
-
-	if len(chapters) == 0 {
-		return fmt.Errorf("novel has no chapters")
-	}
-
-	// 3. 合并所有章节内容
-	var novelContent strings.Builder
-	totalWords := 0
-	for _, ch := range chapters {
-		novelContent.WriteString(fmt.Sprintf("\n\n=== 第 %d 章：%s ===\n\n", ch.Sequence, ch.Title))
-		novelContent.WriteString(ch.ChapterText)
-		totalWords += ch.WordCount
-	}
-
-	// 4. 构建 prompt，只提取角色和道具
-	prompt := buildCharactersAndPropsPrompt(novelContent.String(), len(chapters), totalWords, novelEntity.Style)
-
-	// 5. 调用 LLM 生成（直接使用 llmProvider）
-	jsonText, err := s.llmProvider.Generate(ctx, prompt)
-	if err != nil {
-		return fmt.Errorf("generate characters and props failed: %w", err)
-	}
-
-	// 6. 解析 JSON
-	jsonContent, err := noveltools.ParseSceneAndShotJSON(jsonText)
-	if err != nil {
-		return fmt.Errorf("parse json failed: %w", err)
-	}
-
-	// 7. 保存角色和道具
 	now := time.Now()
 	for _, char := range jsonContent.Characters {
 		if char == nil || char.Name == "" {
@@ -126,54 +91,69 @@ func (s *novelService) GenerateCharactersFromNovel(ctx context.Context, novelID 
 		}
 	}
 
-	// 8. 保存道具
-	for _, prop := range jsonContent.Props {
-		if prop == nil || prop.Name == "" {
-			continue
-		}
-		// 检查道具是否已存在
-		existing, err := s.propRepo.FindByName(ctx, novelID, prop.Name)
-		if err == nil && existing != nil {
-			// 道具已存在，更新信息（保留已有的图片等）
-			updates := map[string]interface{}{
-				"updated_at": now,
-			}
-			if prop.Description != "" {
-				updates["description"] = prop.Description
-			}
-			if prop.Category != "" {
-				updates["category"] = prop.Category
-			}
-			if prop.ImagePrompt != "" {
-				updates["image_prompt"] = prop.ImagePrompt
-			}
-			if err := s.propRepo.Update(ctx, existing.ID, updates); err != nil {
-				log.Warn().Err(err).
-					Str("prop_id", existing.ID).
-					Str("prop_name", existing.Name).
-					Msg("更新道具信息失败，继续处理")
-			}
-		} else {
-			// 道具不存在，创建新道具
-			prop.ID = id.New()
-			prop.NovelID = novelID
-			prop.CreatedAt = now
-			prop.UpdatedAt = now
-			if err := s.propRepo.Create(ctx, prop); err != nil {
-				log.Warn().Err(err).
-					Str("prop_name", prop.Name).
-					Msg("创建道具失败，继续处理")
-			}
-		}
-	}
-
 	log.Info().
 		Str("novel_id", novelID).
 		Int("characters_count", len(jsonContent.Characters)).
-		Int("props_count", len(jsonContent.Props)).
-		Msg("从小说内容生成角色和道具成功")
+		Msg("从小说内容生成角色成功")
 
 	return nil
+}
+
+// generateCharactersAndPropsJSON 基于整部小说内容调用 LLM 并解析为角色+道具 JSON
+func (s *novelService) generateCharactersAndPropsJSON(ctx context.Context, novelID string) (*noveltools.CharactersAndPropsJSONContent, error) {
+	novelEntity, err := s.novelRepo.FindByID(ctx, novelID)
+	if err != nil {
+		return nil, fmt.Errorf("find novel: %w", err)
+	}
+
+	chapters, err := s.chapterRepo.FindByNovelID(ctx, novelID)
+	if err != nil {
+		return nil, fmt.Errorf("find chapters: %w", err)
+	}
+	if len(chapters) == 0 {
+		return nil, fmt.Errorf("novel has no chapters")
+	}
+
+	var novelContent strings.Builder
+	totalWords := 0
+	for _, ch := range chapters {
+		novelContent.WriteString(fmt.Sprintf("\n\n=== 第 %d 章：%s ===\n\n", ch.Sequence, ch.Title))
+		novelContent.WriteString(ch.ChapterText)
+		totalWords += ch.WordCount
+	}
+
+	// 优先从 Prompt 模块加载角色资产提取提示词模板
+	var prompt string
+	if s.promptService != nil {
+		tpl, err := s.promptService.GetTemplateByTypeCode(ctx, "character", "asset_extraction", "zh-CN")
+		if err == nil && tpl != nil && tpl.Content != "" {
+			var b strings.Builder
+			b.WriteString(tpl.Content)
+			fmt.Fprintf(&b, "\n小说信息：共 %d 章，总字数约 %d 字。\n\n", len(chapters), totalWords)
+			b.WriteString("下面是整个小说的内容：\n")
+			b.WriteString("---- BEGIN NOVEL ----\n")
+			b.WriteString(novelContent.String())
+			b.WriteString("\n---- END NOVEL ----\n\n")
+			prompt = b.String()
+		}
+	}
+
+	// 如果 PromptService 不可用或模板缺失，则退回到内置提示词
+	if prompt == "" {
+		prompt = buildCharactersAndPropsPrompt(novelContent.String(), len(chapters), totalWords, novelEntity.Style)
+	}
+
+	jsonText, err := s.llmProvider.Generate(ctx, prompt)
+	if err != nil {
+		return nil, fmt.Errorf("generate characters and props failed: %w", err)
+	}
+
+	jsonContent, err := noveltools.ParseCharactersAndPropsJSON(jsonText)
+	if err != nil {
+		return nil, fmt.Errorf("parse characters and props json failed: %w", err)
+	}
+
+	return jsonContent, nil
 }
 
 // buildCharactersAndPropsPrompt 构建提取角色和道具的提示词

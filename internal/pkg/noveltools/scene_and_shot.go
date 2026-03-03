@@ -443,39 +443,46 @@ type SceneWithShots struct {
 // ParseSceneAndShotJSON 解析 JSON 格式的场景和镜头数据
 // 直接解析到使用 model 层结构体嵌套的格式
 func ParseSceneAndShotJSON(jsonContent string) (*SceneAndShotJSONContent, error) {
-	// 清理 JSON 内容（移除首尾空白，移除 markdown 代码块标记）
-	jsonContent = strings.TrimSpace(jsonContent)
-
-	// 移除 markdown 代码块标记（如果存在）
-	// 优先使用简单的字符串操作，避免正则表达式
-	if strings.HasPrefix(jsonContent, "```") {
-		// 移除开头的 ```json 或 ```
-		if strings.HasPrefix(jsonContent, "```json") {
-			jsonContent = strings.TrimPrefix(jsonContent, "```json")
-		} else {
-			jsonContent = strings.TrimPrefix(jsonContent, "```")
-		}
-		jsonContent = strings.TrimSpace(jsonContent)
-	}
-	if strings.HasSuffix(jsonContent, "```") {
-		jsonContent = strings.TrimSuffix(jsonContent, "```")
-		jsonContent = strings.TrimSpace(jsonContent)
-	}
-
-	// 检查空内容
-	if jsonContent == "" {
+	cleaned := CleanJSONContent(jsonContent)
+	if strings.TrimSpace(cleaned) == "" {
 		return nil, fmt.Errorf("json content is empty")
 	}
 
 	// 尝试解析 JSON 到结构体（直接使用 model 层的嵌套结构）
 	var content SceneAndShotJSONContent
-	if err := json.Unmarshal([]byte(jsonContent), &content); err != nil {
+	if err := json.Unmarshal([]byte(cleaned), &content); err != nil {
 		return nil, fmt.Errorf("json parse failed: %w", err)
 	}
 
-	// 验证基本结构
+	// 场景/镜头流程：必须包含至少一个场景
 	if len(content.Scenes) == 0 {
 		return nil, fmt.Errorf("missing scenes field or scenes is empty")
+	}
+
+	return &content, nil
+}
+
+// CharactersAndPropsJSONContent 角色和道具 JSON 结构
+// 用于仅提取角色和道具的场景（不依赖 scenes/shots）
+type CharactersAndPropsJSONContent struct {
+	Characters []*novel.Character `json:"characters,omitempty"`
+	Props      []*novel.Prop      `json:"props,omitempty"`
+}
+
+// ParseCharactersAndPropsJSON 解析仅包含角色和道具的 JSON 内容
+func ParseCharactersAndPropsJSON(jsonContent string) (*CharactersAndPropsJSONContent, error) {
+	cleaned := CleanJSONContent(jsonContent)
+	if strings.TrimSpace(cleaned) == "" {
+		return nil, fmt.Errorf("json content is empty")
+	}
+
+	var content CharactersAndPropsJSONContent
+	if err := json.Unmarshal([]byte(cleaned), &content); err != nil {
+		return nil, fmt.Errorf("json parse failed: %w", err)
+	}
+
+	if len(content.Characters) == 0 && len(content.Props) == 0 {
+		return nil, fmt.Errorf("missing characters and props")
 	}
 
 	return &content, nil

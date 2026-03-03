@@ -1,4 +1,4 @@
-.PHONY: all build run dev test lint lint-fix fmt clean deps tools docker-build docker-run docker-stop wire coverage help init-admin
+.PHONY: all build run dev test lint lint-fix fmt clean deps tools docker-build docker-run docker-stop wire coverage help init-admin init-prompts
 
 # 变量
 APP_NAME := lemon
@@ -188,4 +188,8 @@ help:
 
 ## 初始化管理员账号（默认 admin / admin123）
 init-admin:
-	INIT_ADMIN_USERNAME=admin INIT_ADMIN_PASSWORD=admin123 go run ./scripts/init_admin.go
+	INIT_ADMIN_USERNAME=admin INIT_ADMIN_PASSWORD=admin123 go run ./scripts/init_admin
+
+## 初始化基础提示词模板（从 internal/prompts 目录导入）
+init-prompts:
+	go run ./scripts/init_prompts
